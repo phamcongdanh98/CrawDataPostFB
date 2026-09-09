@@ -1,0 +1,26 @@
+{
+  "name": "lay_data_fb",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/server.js",
+  "scripts": {
+    "login": "node login.js",
+    "dev": "node src/server.js",
+    "start": "node src/server.js",
+    "sync": "node src/cli.js sync",
+    "publishers": "node src/cli.js publishers",
+    "test:post": "node src/cli.js test-post",
+    "stats": "node src/cli.js stats"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "playwright": "^1.63.0",
+    "xlsx": "^0.18.5"
+  }
+}

@@ -1,0 +1,12 @@
+node_modules/
+.env
+fb-profile/
+data/
+debug/
+*.sqlite
+*.sqlite3
+*.db
+*.xlsx
+*.csv
+.DS_Store
+Thumbs.db

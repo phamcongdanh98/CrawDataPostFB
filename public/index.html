@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Thống Kê Bài Viết Fanpage & Người Đăng</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-content">
+        <div class="header-title-group">
+          <span class="logo-badge">FB Fanpage</span>
+          <h1>THỐNG KÊ BÀI VIẾT FANPAGE</h1>
+          <p class="subtitle">Trích xuất danh sách bài viết qua Graph API v26 và nhận diện người đăng qua Playwright</p>
+        </div>
+        <div class="header-actions">
+          <button id="btnOpenTestModal" class="btn btn-secondary">
+            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            Test riêng 1 bài
+          </button>
+          <a id="btnExportExcel" href="/api/export.xlsx" class="btn btn-excel" download>
+            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+            Xuất Excel (.xlsx)
+          </a>
+          <a id="btnExportCsv" href="/api/export.csv" class="btn btn-outline" download>
+            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+            Xuất CSV
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <!-- Banners trạng thái cấu hình -->
+    <div id="statusBanners" class="banners-container">
+      <!-- Sẽ được điền động bằng JS nếu thiếu token/profile -->
+    </div>
+
+    <!-- Controls Panel -->
+    <section class="panel controls-panel">
+      <form id="controlForm" class="controls-form">
+        <div class="control-group">
+          <label for="sinceDate">Từ ngày (dd/mm/yyyy)</label>
+          <div class="date-picker-combo">
+            <input type="text" id="sinceDate" name="since" placeholder="dd/mm/yyyy" maxlength="10" required>
+            <input type="date" id="sinceDatePicker" class="hidden-native-picker" tabindex="-1">
+            <button type="button" id="btnSinceCalendar" class="btn-calendar" title="Chọn ngày từ lịch">📅</button>
+          </div>
+        </div>
+        <div class="control-group">
+          <label for="untilDate">Đến ngày (dd/mm/yyyy)</label>
+          <div class="date-picker-combo">
+            <input type="text" id="untilDate" name="until" placeholder="dd/mm/yyyy" maxlength="10" required>
+            <input type="date" id="untilDatePicker" class="hidden-native-picker" tabindex="-1">
+            <button type="button" id="btnUntilCalendar" class="btn-calendar" title="Chọn ngày từ lịch">📅</button>
+          </div>
+        </div>
+        <div class="control-group checkbox-group">
+          <label class="checkbox-label" title="Quét lại cả các bài đã từng xử lý">
+            <input type="checkbox" id="forceRecheck">
+            <span>Kiểm tra lại các bài đã xử lý</span>
+          </label>
+        </div>
+        <div class="control-buttons">
+          <button type="button" id="btnSyncPosts" class="btn btn-primary" title="Lấy bài viết từ Meta Graph API lưu vào SQLite">
+            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+            Đồng bộ bài viết
+          </button>
+          <button type="button" id="btnDetectPublishers" class="btn btn-success" title="Mở Playwright để đọc thông tin người đăng từ Facebook">
+            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+            Lấy người đăng
+          </button>
+          <button type="button" id="btnSyncAll" class="btn btn-accent" title="Đồng bộ Graph API sau đó tự động tìm người đăng">
+            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            Đồng bộ tất cả
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Progress Notification Bar (ẩn khi không chạy) -->
+    <section id="progressSection" class="panel progress-panel" style="display: none;">
+      <div class="progress-header">
+        <div class="progress-title">
+          <span class="spinner"></span>
+          <strong>Đang xử lý quét người đăng Facebook...</strong>
+          <span id="progressCountText" class="badge badge-info">0 / 0</span>
+        </div>
+        <button id="btnStopJob" class="btn btn-sm btn-danger">Dừng lại</button>
+      </div>
+      <div class="progress-bar-container">
+        <div id="progressBarFill" class="progress-bar-fill" style="width: 0%;"></div>
+      </div>
+      <div class="progress-details">
+        <div class="detail-item"><strong>Bài hiện tại:</strong> <span id="progressCurrentMsg">-</span></div>
+        <div class="detail-item"><strong>Người đăng vừa tìm:</strong> <span id="progressCurrentPub" class="text-success">-</span></div>
+        <div class="detail-stats">
+          <span class="badge badge-success">FOUND: <b id="progFound">0</b></span>
+          <span class="badge badge-warning">NOT_FOUND: <b id="progNotFound">0</b></span>
+          <span class="badge badge-danger">LỖI: <b id="progErrors">0</b></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Metrics Cards -->
+    <section class="metrics-grid">
+      <div class="card metric-card">
+        <div class="metric-icon icon-total">📄</div>
+        <div class="metric-info">
+          <span class="metric-label">Tổng bài</span>
+          <h3 id="statTotalPosts" class="metric-value">0</h3>
+        </div>
+      </div>
+      <div class="card metric-card">
+        <div class="metric-icon icon-found">✅</div>
+        <div class="metric-info">
+          <span class="metric-label">Đã xác định</span>
+          <h3 id="statFound" class="metric-value text-success">0</h3>
+        </div>
+      </div>
+      <div class="card metric-card">
+        <div class="metric-icon icon-pending">⏳</div>
+        <div class="metric-info">
+          <span class="metric-label">Chưa xác định</span>
+          <h3 id="statPending" class="metric-value text-warning">0</h3>
+        </div>
+      </div>
+      <div class="card metric-card">
+        <div class="metric-icon icon-error">⚠️</div>
+        <div class="metric-info">
+          <span class="metric-label">Lỗi / Không xem được</span>
+          <h3 id="statErrors" class="metric-value text-danger">0</h3>
+        </div>
+      </div>
+      <div class="card metric-card">
+        <div class="metric-icon icon-users">👥</div>
+        <div class="metric-info">
+          <span class="metric-label">Số người đăng</span>
+          <h3 id="statPublishersCount" class="metric-value text-primary">0</h3>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Content Layout (2 cột: Thống kê người đăng + Bảng bài viết) -->
+    <main class="main-layout">
+      <!-- Cột Trái: Thống kê theo người đăng -->
+      <aside class="panel publisher-panel">
+        <div class="panel-header">
+          <h2>Thống kê người đăng</h2>
+          <button id="btnClearPublisherFilter" class="btn btn-xs btn-outline" style="display: none;">Xem tất cả</button>
+        </div>
+        <div class="table-responsive">
+          <table class="data-table" id="publisherTable">
+            <thead>
+              <tr>
+                <th>Người đăng</th>
+                <th style="text-align: right;">Số bài</th>
+              </tr>
+            </thead>
+            <tbody id="publisherTableBody">
+              <tr>
+                <td colspan="2" class="empty-cell">Chưa có dữ liệu</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </aside>
+
+      <!-- Cột Phải: Bảng bài viết -->
+      <section class="panel posts-panel">
+        <div class="panel-header">
+          <h2>Danh sách bài viết</h2>
+          <div class="posts-filters">
+            <input type="text" id="filterSearch" placeholder="Tìm nội dung / ID..." class="input-sm">
+            <select id="filterStatus" class="select-sm">
+              <option value="ALL">Tất cả trạng thái</option>
+              <option value="FOUND">Đã xác định (FOUND)</option>
+              <option value="PENDING">Chờ xử lý (PENDING)</option>
+              <option value="NOT_FOUND">Không tìm thấy (NOT_FOUND)</option>
+              <option value="ERROR">Lỗi / Unavailable</option>
+            </select>
+            <button id="btnRefreshList" class="btn btn-sm btn-outline">Làm mới</button>
+          </div>
+        </div>
+
+        <div class="active-filter-bar" id="activeFilterNotice" style="display: none;">
+          <span>Đang lọc theo người đăng: <strong id="currentFilterPublisherName"></strong></span>
+          <button id="btnRemovePubFilter" class="btn-link">Bỏ lọc ✕</button>
+        </div>
+
+        <div class="table-responsive">
+          <table class="data-table" id="postsTable">
+            <thead>
+              <tr>
+                <th style="width: 135px;">Ngày đăng</th>
+                <th style="width: 150px;">Người đăng</th>
+                <th>Nội dung bài viết</th>
+                <th style="width: 130px; text-align: center;">Tương tác</th>
+                <th style="width: 110px; text-align: center;">Trạng thái</th>
+                <th style="width: 70px; text-align: center;">Link</th>
+              </tr>
+            </thead>
+            <tbody id="postsTableBody">
+              <tr>
+                <td colspan="6" class="empty-cell">Chưa có dữ liệu trong khoảng thời gian này.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="pagination-footer">
+          <div class="pagination-info">
+            Hiển thị <span id="pageRangeText">0 - 0</span> / <span id="pageTotalText">0</span> bài
+          </div>
+          <div class="pagination-controls">
+            <button id="btnPrevPage" class="btn btn-sm btn-outline" disabled>Trước</button>
+            <span id="currentPageText" class="page-number">Trang 1 / 1</span>
+            <button id="btnNextPage" class="btn btn-sm btn-outline" disabled>Sau</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal Test riêng 1 bài -->
+  <div id="testPostModal" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Kiểm tra thử nghiệm 1 bài viết</h3>
+        <button id="btnCloseModal" class="btn-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted">Mở trực tiếp liên kết bài viết Facebook bằng Playwright để kiểm tra detector trích xuất người đăng.</p>
+        <div class="control-group" style="margin-top: 1rem;">
+          <label for="testPostUrl">URL bài viết Facebook:</label>
+          <input type="url" id="testPostUrl" placeholder="https://www.facebook.com/..." class="input-full">
+        </div>
+        <div id="testResultBox" class="test-result-box" style="display: none;">
+          <!-- Kết quả test hiển thị ở đây -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnCancelModal" class="btn btn-secondary">Đóng</button>
+        <button id="btnRunTestPost" class="btn btn-primary">
+          <span id="testSpinner" class="spinner-sm" style="display: none;"></span>
+          Bắt đầu kiểm tra
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
