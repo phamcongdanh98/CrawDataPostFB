@@ -34,7 +34,7 @@ async function getBrowserContext(customOptions = {}) {
     viewport: { width: 1280, height: 800 },
     locale: 'vi-VN',
     timezoneId: config.TZ,
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     args: [
       '--disable-blink-features=AutomationControlled',
       '--no-sandbox',
@@ -43,6 +43,10 @@ async function getBrowserContext(customOptions = {}) {
       '--disable-infobars',
       '--window-size=1280,800'
     ]
+  });
+
+  await globalContext.addInitScript(() => {
+    delete Object.getPrototypeOf(navigator).webdriver;
   });
 
   globalContext.on('close', () => {

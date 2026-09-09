@@ -46,6 +46,21 @@ function stopJob() {
   }
 }
 
+function getCandidateUrls(post) {
+  const urls = [];
+  const parts = (post.id || '').split('_');
+  const pageId = post.page_id || parts[0];
+  const storyFbid = parts[1];
+
+  if (pageId && storyFbid) {
+    urls.push(`https://www.facebook.com/permalink.php?story_fbid=${storyFbid}&id=${pageId}`);
+  }
+  if (post.permalink_url && !urls.includes(post.permalink_url)) {
+    urls.push(post.permalink_url);
+  }
+  return urls;
+}
+
 /**
  * Xử lý một bài viết đơn lẻ
  */
@@ -60,27 +75,39 @@ async function processSinglePost(context, post) {
     page.setDefaultTimeout(30000);
     page.setDefaultNavigationTimeout(30000);
 
-    // Mở trực tiếp permalink_url của bài viết
-    await page.goto(post.permalink_url, { waitUntil: 'domcontentloaded' });
+    const urls = getCandidateUrls(post);
 
-    // 1. Kiểm tra session đăng nhập
-    const loginCheck = await checkPageLogin(page);
-    if (!loginCheck.isLoggedIn) {
-      result = {
-        status: 'LOGIN_REQUIRED',
-        reason: loginCheck.reason || 'Phiên Facebook đã hết hạn. Hãy chạy: npm run login'
-      };
-      return result;
+    for (let i = 0; i < urls.length; i++) {
+      const targetUrl = urls[i];
+      await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+
+      // 1. Kiểm tra session đăng nhập
+      const loginCheck = await checkPageLogin(page);
+      if (!loginCheck.isLoggedIn) {
+        return {
+          status: 'LOGIN_REQUIRED',
+          reason: loginCheck.reason || 'Phiên Facebook đã hết hạn. Hãy chạy: npm run login'
+        };
+      }
+
+      // 2. Chạy detector
+      result = await detectPublisher(page, {
+        postId: post.id
+      });
+
+      if (result.status === 'FOUND') {
+        break;
+      }
+
+      // Nếu còn URL dự phòng thì thử tiếp
+      if (i < urls.length - 1) {
+        await sleep(1000);
+      }
     }
 
-    // 2. Chạy detector
-    result = await detectPublisher(page, {
-      postId: post.id
-    });
-
-    return result;
+    return result || { status: 'NOT_FOUND', reason: 'Không tìm thấy thông tin người đăng' };
   } catch (err) {
-    result = {
+    return {
       status: 'ERROR',
       reason: err.message
     };
@@ -108,9 +135,12 @@ async function runPublisherWorker(options = {}) {
 
   const force = Boolean(options.force);
   const limit = options.limit || 10000;
+  const since = options.since || null;
+  const until = options.until || null;
+  const batchId = options.batchId || null;
 
-  // Lấy các bài cần xử lý từ DB
-  const postsToProcess = db.getPendingPosts(limit, force);
+  // Lấy các bài cần xử lý từ DB theo bộ lọc
+  const postsToProcess = db.getPendingPosts({ limit, force, since, until, batchId });
 
   if (postsToProcess.length === 0) {
     console.log('[Worker] Không có bài viết nào cần xử lý.');

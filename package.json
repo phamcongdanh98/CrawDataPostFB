@@ -10,7 +10,8 @@
     "sync": "node src/cli.js sync",
     "publishers": "node src/cli.js publishers",
     "test:post": "node src/cli.js test-post",
-    "stats": "node src/cli.js stats"
+    "stats": "node src/cli.js stats",
+    "test": "node test/run-tests.js"
   },
   "keywords": [],
   "author": "",

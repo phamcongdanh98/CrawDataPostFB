@@ -725,12 +725,18 @@ btnSyncPosts.addEventListener('click', async () => {
  */
 btnDetectPublishers.addEventListener('click', async () => {
   const force = forceRecheckCheckbox.checked;
+  const sinceVal = sinceDateInput.value.trim();
+  const untilVal = untilDateInput.value.trim();
 
   try {
     const res = await fetch('/api/detect-publishers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ force })
+      body: JSON.stringify({
+        force,
+        since: sinceVal || undefined,
+        until: untilVal || undefined
+      })
     });
 
     const data = await res.json();
@@ -803,13 +809,13 @@ function startJobPolling() {
 
       if (status.isRunning) {
         const total = status.total || 0;
-        const current = status.current || 0;
+        const current = status.processed !== undefined ? status.processed : (status.current || 0);
         const pct = total > 0 ? Math.round((current / total) * 100) : 0;
 
         progressBarFill.style.width = `${pct}%`;
-        progressCountText.textContent = `${current} / ${total} (${pct}%)`;
-        progressCurrentMsg.textContent = status.currentPostUrl ? truncateText(status.currentPostUrl, 60) : '-';
-        progressCurrentPub.textContent = status.lastPublisher || '-';
+        progressCountText.textContent = `${current} / ${total} bài (${pct}%)`;
+        progressCurrentMsg.textContent = status.currentPostMessage ? truncateText(status.currentPostMessage, 60) : (status.currentPostUrl ? truncateText(status.currentPostUrl, 60) : '-');
+        progressCurrentPub.textContent = status.currentPublisher || status.lastPublisher || '-';
 
         progFound.textContent = status.found || 0;
         progNotFound.textContent = status.notFound || 0;

@@ -385,10 +385,15 @@ app.post('/api/detect-publishers', (req, res) => {
     return res.status(400).json({ error: 'Tiến trình tìm người đăng đang chạy. Vui lòng chờ.' });
   }
 
-  const { force = false } = req.body;
+  const { force = false, since, until, batchId } = req.body;
 
-  // Khởi chạy tiến trình bất đồng bộ ở background
-  detectPublishers({ force: Boolean(force) }).catch((err) => {
+  // Khởi chạy tiến trình bất đồng bộ ở background với bộ lọc ngày/đợt
+  detectPublishers({
+    force: Boolean(force),
+    since: since ? (normalizeDateStr(since) || since) : null,
+    until: until ? (normalizeDateStr(until) || until) : null,
+    batchId: batchId || null
+  }).catch((err) => {
     console.error('[API] Lỗi trong tiến trình detect-publishers:', err);
   });
 
@@ -434,8 +439,13 @@ app.post('/api/sync-all', async (req, res) => {
     // Bước 1: Lấy bài viết từ Graph API (chờ đồng bộ xong)
     const syncResult = await syncPosts(normSince, normUntil);
 
-    // Bước 2: Chạy crawler ở nền
-    detectPublishers({ force: Boolean(force) }).catch((err) => {
+    // Bước 2: Chạy crawler ở nền cho đúng đợt bài viết vừa lấy
+    detectPublishers({
+      force: Boolean(force),
+      batchId: syncResult.batchId,
+      since: normSince,
+      until: normUntil
+    }).catch((err) => {
       console.error('[API] Lỗi trong detectPublishers sau syncAll:', err);
     });
 

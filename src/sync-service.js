@@ -59,8 +59,13 @@ async function syncAll(since, until, options = {}) {
   // Bước 1: Lấy bài viết từ Graph API
   const syncResult = await syncPosts(since, until, options);
 
-  // Bước 2: Duyệt tìm người đăng cho các bài mới lấy
-  const detectResult = await detectPublishers(options);
+  // Bước 2: Duyệt tìm người đăng cho các bài mới lấy thuộc đợt này
+  const detectResult = await detectPublishers({
+    ...options,
+    batchId: syncResult.batchId,
+    since,
+    until
+  });
 
   return {
     syncResult,

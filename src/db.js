@@ -99,7 +99,17 @@ function initSchema(db) {
  * Thêm mới hoặc cập nhật bài viết từ Meta Graph API
  * Không ghi đè thông tin publisher nếu bài đã FOUND
  */
-function upsertPost(db, post, batchId = null) {
+function upsertPost(dbOrPost, postOrBatchId, maybeBatchId = null) {
+  let db, post, batchId;
+  if (dbOrPost && typeof dbOrPost.prepare === 'function') {
+    db = dbOrPost;
+    post = postOrBatchId;
+    batchId = maybeBatchId;
+  } else {
+    db = getDb();
+    post = dbOrPost;
+    batchId = postOrBatchId;
+  }
   const now = new Date().toISOString();
   const existing = db.prepare(`SELECT id, publisher_status, sync_batch_id FROM posts WHERE id = ?`).get(post.id);
 
@@ -219,18 +229,62 @@ function updatePublisherResult(id, result) {
 }
 
 /**
- * Lấy danh sách bài viết chờ crawl publisher
- * @param {boolean} force - nếu true thì crawl cả bài đã NOT_FOUND / ERROR / PENDING
+ * Lấy danh sách bài viết chờ crawl publisher (hỗ trợ lọc theo khoảng ngày since/until hoặc đợt batchId)
+ * @param {Object|number} optionsOrLimit
+ * @param {boolean} legacyForce
  */
-function getPendingPosts(limit = 100, force = false) {
+function getPendingPosts(optionsOrLimit = {}, legacyForce = false) {
   const db = getDb();
-  let query = '';
-  if (force) {
-    query = `SELECT * FROM posts ORDER BY created_time DESC LIMIT ?`;
-  } else {
-    query = `SELECT * FROM posts WHERE publisher_status = 'PENDING' ORDER BY created_time DESC LIMIT ?`;
+  let limit = 10000;
+  let force = false;
+  let since = null;
+  let until = null;
+  let batchId = null;
+
+  if (typeof optionsOrLimit === 'number') {
+    limit = optionsOrLimit;
+    force = Boolean(legacyForce);
+  } else if (typeof optionsOrLimit === 'object' && optionsOrLimit !== null) {
+    limit = optionsOrLimit.limit || 10000;
+    force = Boolean(optionsOrLimit.force);
+    since = optionsOrLimit.since || null;
+    until = optionsOrLimit.until || null;
+    batchId = optionsOrLimit.batchId || null;
   }
-  return db.prepare(query).all(limit);
+
+  const conditions = [];
+  const params = {};
+
+  if (!force) {
+    conditions.push(`publisher_status = 'PENDING'`);
+  }
+
+  if (batchId && batchId !== 'ALL') {
+    conditions.push(`sync_batch_id = @batchId`);
+    params.batchId = batchId;
+  }
+
+  if (since) {
+    const norm = normalizeDateStr(since) || since;
+    conditions.push(`created_time >= @since`);
+    params.since = `${norm}T00:00:00+07:00`;
+  }
+
+  if (until) {
+    const norm = normalizeDateStr(until) || until;
+    conditions.push(`created_time <= @until`);
+    params.until = `${norm}T23:59:59+07:00`;
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  params.limit = limit;
+
+  return db.prepare(`
+    SELECT * FROM posts
+    ${whereClause}
+    ORDER BY created_time DESC
+    LIMIT @limit
+  `).all(params);
 }
 
 /**
