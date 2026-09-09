@@ -18,22 +18,59 @@ if (!fs.existsSync(DEBUG_DIR)) {
   fs.mkdirSync(DEBUG_DIR, { recursive: true });
 }
 
+function reloadEnv() {
+  const envPath = path.resolve(ROOT_DIR, '.env');
+  if (fs.existsSync(envPath)) {
+    try {
+      const parsed = dotenv.parse(fs.readFileSync(envPath, 'utf8'));
+      for (const [k, v] of Object.entries(parsed)) {
+        process.env[k] = v;
+      }
+    } catch (e) {
+      console.warn('[Config] Không thể reload .env:', e.message);
+    }
+  }
+}
+
 const config = {
   ROOT_DIR,
   DATA_DIR,
   DEBUG_DIR,
   DB_PATH,
-  FB_PAGE_ID: (process.env.FB_PAGE_ID || '').trim(),
-  FB_PAGE_ACCESS_TOKEN: (process.env.FB_PAGE_ACCESS_TOKEN || '').trim(),
-  PORT: parseInt(process.env.PORT, 10) || 3000,
-  FB_GRAPH_VERSION: (process.env.FB_GRAPH_VERSION || 'v26.0').trim(),
-  FB_PROFILE_DIR,
-  FB_HEADLESS: process.env.FB_HEADLESS === 'true',
-  FB_CONCURRENCY: Math.min(4, Math.max(1, parseInt(process.env.FB_CONCURRENCY, 10) || 2)),
-  FB_DELAY_MIN_MS: Math.max(500, parseInt(process.env.FB_DELAY_MIN_MS, 10) || 1500),
-  FB_DELAY_MAX_MS: Math.max(1000, parseInt(process.env.FB_DELAY_MAX_MS, 10) || 3500),
-  FB_MAX_RETRIES: Math.max(1, parseInt(process.env.FB_MAX_RETRIES, 10) || 2),
-  TZ: process.env.TZ || 'Asia/Ho_Chi_Minh',
+  reloadEnv,
+  get FB_PAGE_ID() {
+    return (process.env.FB_PAGE_ID || '').trim();
+  },
+  get FB_PAGE_ACCESS_TOKEN() {
+    return (process.env.FB_PAGE_ACCESS_TOKEN || '').trim();
+  },
+  get PORT() {
+    return parseInt(process.env.PORT, 10) || 3000;
+  },
+  get FB_GRAPH_VERSION() {
+    return (process.env.FB_GRAPH_VERSION || 'v26.0').trim();
+  },
+  get FB_PROFILE_DIR() {
+    return path.resolve(ROOT_DIR, process.env.FB_PROFILE_DIR || './fb-profile');
+  },
+  get FB_HEADLESS() {
+    return process.env.FB_HEADLESS === 'true';
+  },
+  get FB_CONCURRENCY() {
+    return Math.min(4, Math.max(1, parseInt(process.env.FB_CONCURRENCY, 10) || 2));
+  },
+  get FB_DELAY_MIN_MS() {
+    return Math.max(500, parseInt(process.env.FB_DELAY_MIN_MS, 10) || 1500);
+  },
+  get FB_DELAY_MAX_MS() {
+    return Math.max(1000, parseInt(process.env.FB_DELAY_MAX_MS, 10) || 3500);
+  },
+  get FB_MAX_RETRIES() {
+    return Math.max(1, parseInt(process.env.FB_MAX_RETRIES, 10) || 2);
+  },
+  get TZ() {
+    return process.env.TZ || 'Asia/Ho_Chi_Minh';
+  },
 
   isApiConfigured() {
     return Boolean(this.FB_PAGE_ID && this.FB_PAGE_ACCESS_TOKEN);

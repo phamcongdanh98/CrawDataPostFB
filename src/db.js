@@ -47,25 +47,66 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_posts_publisher_name ON posts(publisher_name);
     CREATE INDEX IF NOT EXISTS idx_posts_publisher_status ON posts(publisher_status);
     CREATE INDEX IF NOT EXISTS idx_posts_page_id ON posts(page_id);
+
+    CREATE TABLE IF NOT EXISTS sync_batches (
+      id TEXT PRIMARY KEY,
+      batch_name TEXT,
+      synced_at TEXT NOT NULL,
+      since_date TEXT NOT NULL,
+      until_date TEXT NOT NULL,
+      total_posts INTEGER DEFAULT 0,
+      inserted_posts INTEGER DEFAULT 0,
+      updated_posts INTEGER DEFAULT 0,
+      note TEXT
+    );
   `);
 
   // Tự động bổ sung cột nếu bảng đã được tạo từ trước
   try { db.exec(`ALTER TABLE posts ADD COLUMN likes_count INTEGER DEFAULT 0;`); } catch (e) {}
   try { db.exec(`ALTER TABLE posts ADD COLUMN comments_count INTEGER DEFAULT 0;`); } catch (e) {}
   try { db.exec(`ALTER TABLE posts ADD COLUMN shares_count INTEGER DEFAULT 0;`); } catch (e) {}
+  try { db.exec(`ALTER TABLE posts ADD COLUMN sync_batch_id TEXT;`); } catch (e) {}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_posts_sync_batch ON posts(sync_batch_id);`); } catch (e) {}
+
+  // Gán đợt ban đầu cho các bài viết cũ chưa có sync_batch_id
+  try {
+    const nullBatchRow = db.prepare(`SELECT COUNT(*) as c FROM posts WHERE sync_batch_id IS NULL`).get();
+    if (nullBatchRow && nullBatchRow.c > 0) {
+      const initBatchId = 'batch_init';
+      const hasBatch = db.prepare(`SELECT id FROM sync_batches WHERE id = ?`).get(initBatchId);
+      if (!hasBatch) {
+        db.prepare(`
+          INSERT INTO sync_batches (id, batch_name, synced_at, since_date, until_date, total_posts, inserted_posts, updated_posts, note)
+          VALUES (?, ?, datetime('now', 'localtime'), ?, ?, ?, ?, 0, ?)
+        `).run(
+          initBatchId,
+          'Đợt đồng bộ trước đây',
+          '01/07/2026',
+          '09/09/2026',
+          nullBatchRow.c,
+          nullBatchRow.c,
+          'Dữ liệu đã đồng bộ trong hệ thống'
+        );
+      }
+      db.prepare(`UPDATE posts SET sync_batch_id = ? WHERE sync_batch_id IS NULL`).run(initBatchId);
+    }
+  } catch (e) {
+    console.warn('[DB] Lỗi khởi tạo migration sync_batch_id:', e.message);
+  }
 }
 
 /**
  * Thêm mới hoặc cập nhật bài viết từ Meta Graph API
  * Không ghi đè thông tin publisher nếu bài đã FOUND
  */
-function upsertPost(db, post) {
+function upsertPost(db, post, batchId = null) {
   const now = new Date().toISOString();
-  const existing = db.prepare(`SELECT id, publisher_status FROM posts WHERE id = ?`).get(post.id);
+  const existing = db.prepare(`SELECT id, publisher_status, sync_batch_id FROM posts WHERE id = ?`).get(post.id);
 
   const likes = post.likes_count ?? 0;
   const comments = post.comments_count ?? 0;
   const shares = post.shares_count ?? 0;
+  const targetBatchId = batchId || (existing ? existing.sync_batch_id : null);
 
   if (!existing) {
     // Insert mới hoàn toàn
@@ -73,11 +114,11 @@ function upsertPost(db, post) {
       INSERT INTO posts (
         id, page_id, message, created_time, permalink_url,
         likes_count, comments_count, shares_count,
-        publisher_status, attempt_count, created_at, updated_at
+        publisher_status, attempt_count, sync_batch_id, created_at, updated_at
       ) VALUES (
         @id, @page_id, @message, @created_time, @permalink_url,
         @likes, @comments, @shares,
-        'PENDING', 0, @now, @now
+        'PENDING', 0, @targetBatchId, @now, @now
       )
     `);
     stmt.run({
@@ -89,6 +130,7 @@ function upsertPost(db, post) {
       likes,
       comments,
       shares,
+      targetBatchId,
       now
     });
     return { inserted: true, updated: false };
@@ -102,6 +144,7 @@ function upsertPost(db, post) {
         likes_count = @likes,
         comments_count = @comments,
         shares_count = @shares,
+        sync_batch_id = COALESCE(@targetBatchId, sync_batch_id),
         updated_at = @now
       WHERE id = @id
     `);
@@ -113,6 +156,7 @@ function upsertPost(db, post) {
       likes,
       comments,
       shares,
+      targetBatchId,
       now
     });
     return { inserted: false, updated: true };
@@ -122,14 +166,14 @@ function upsertPost(db, post) {
 /**
  * Upsert danh sách bài viết trong 1 transaction
  */
-function upsertPosts(posts) {
+function upsertPosts(posts, batchId = null) {
   const db = getDb();
   let insertedCount = 0;
   let updatedCount = 0;
 
   const runTx = db.transaction((items) => {
     for (const item of items) {
-      const res = upsertPost(db, item);
+      const res = upsertPost(db, item, batchId);
       if (res.inserted) insertedCount++;
       if (res.updated) updatedCount++;
     }
@@ -197,6 +241,7 @@ function getPosts(options = {}) {
   const {
     since,
     until,
+    batchId,
     publisher,
     status,
     search,
@@ -207,6 +252,10 @@ function getPosts(options = {}) {
   const conditions = [];
   const params = {};
 
+  if (batchId && batchId !== 'ALL') {
+    conditions.push(`sync_batch_id = @batchId`);
+    params.batchId = batchId;
+  }
   if (since) {
     const norm = normalizeDateStr(since) || since;
     conditions.push(`created_time >= @since`);
@@ -264,11 +313,15 @@ function getPosts(options = {}) {
  */
 function getAllPostsForExport(options = {}) {
   const db = getDb();
-  const { since, until, publisher, status, search } = options;
+  const { since, until, batchId, publisher, status, search } = options;
 
   const conditions = [];
   const params = {};
 
+  if (batchId && batchId !== 'ALL') {
+    conditions.push(`sync_batch_id = @batchId`);
+    params.batchId = batchId;
+  }
   if (since) {
     const norm = normalizeDateStr(since) || since;
     conditions.push(`created_time >= @since`);
@@ -299,6 +352,59 @@ function getAllPostsForExport(options = {}) {
     ${whereClause}
     ORDER BY created_time DESC
   `).all(params);
+}
+
+/**
+ * Tạo đợt đồng bộ mới
+ */
+function createSyncBatch({ id, batch_name, since_date, until_date, total_posts, inserted_posts, updated_posts, note }) {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO sync_batches (id, batch_name, synced_at, since_date, until_date, total_posts, inserted_posts, updated_posts, note)
+    VALUES (@id, @batch_name, datetime('now', 'localtime'), @since_date, @until_date, @total_posts, @inserted_posts, @updated_posts, @note)
+  `);
+  stmt.run({
+    id,
+    batch_name: batch_name || `Đợt đồng bộ ${new Date().toLocaleDateString('vi-VN')}`,
+    since_date: since_date || '',
+    until_date: until_date || '',
+    total_posts: total_posts || 0,
+    inserted_posts: inserted_posts || 0,
+    updated_posts: updated_posts || 0,
+    note: note || ''
+  });
+  return id;
+}
+
+/**
+ * Lấy danh sách các đợt đồng bộ kèm thống kê tổng hợp của từng đợt
+ */
+function getSyncBatches() {
+  const db = getDb();
+  return db.prepare(`
+    SELECT 
+      b.id,
+      b.batch_name,
+      b.synced_at,
+      b.since_date,
+      b.until_date,
+      b.total_posts,
+      b.inserted_posts,
+      b.updated_posts,
+      b.note,
+      COUNT(p.id) as actual_posts_count,
+      SUM(CASE WHEN p.publisher_status = 'FOUND' THEN 1 ELSE 0 END) as found_count,
+      SUM(CASE WHEN p.publisher_status = 'PENDING' THEN 1 ELSE 0 END) as pending_count,
+      SUM(CASE WHEN p.publisher_status = 'NOT_FOUND' THEN 1 ELSE 0 END) as not_found_count,
+      SUM(CASE WHEN p.publisher_status IN ('ERROR', 'POST_UNAVAILABLE', 'LOGIN_REQUIRED') THEN 1 ELSE 0 END) as error_count,
+      COALESCE(SUM(p.likes_count), 0) as total_likes,
+      COALESCE(SUM(p.comments_count), 0) as total_comments,
+      COALESCE(SUM(p.shares_count), 0) as total_shares
+    FROM sync_batches b
+    LEFT JOIN posts p ON p.sync_batch_id = b.id
+    GROUP BY b.id
+    ORDER BY b.synced_at DESC
+  `).all();
 }
 
 /**
@@ -378,5 +484,7 @@ module.exports = {
   getAllPostsForExport,
   getPostById,
   getStats,
-  getPublishersList
+  getPublishersList,
+  createSyncBatch,
+  getSyncBatches
 };

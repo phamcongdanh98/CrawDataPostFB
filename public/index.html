@@ -15,11 +15,20 @@
     <header class="app-header">
       <div class="header-content">
         <div class="header-title-group">
-          <span class="logo-badge">FB Fanpage</span>
+          <div style="display: flex; align-items: center; gap: 0.6rem;">
+            <span class="logo-badge">FB Fanpage</span>
+            <div id="pageConnectedBadge" class="badge badge-success" style="font-size: 11px; padding: 3px 8px; border-radius: 4px; display: none;">
+              🟢 <span id="headerPageInfo">Đang kết nối Fanpage</span>
+            </div>
+          </div>
           <h1>THỐNG KÊ BÀI VIẾT FANPAGE</h1>
-          <p class="subtitle">Trích xuất danh sách bài viết qua Graph API v26 và nhận diện người đăng qua Playwright</p>
+          <p class="subtitle">Đồng bộ bài viết qua Graph API v26 và nhận diện người đăng qua Playwright</p>
         </div>
         <div class="header-actions">
+          <button id="btnOpenSettingsModal" class="btn btn-outline" title="Cài đặt ID Fanpage và Access Token (lưu vào .env)">
+            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+            Cài đặt Fanpage & Token
+          </button>
           <button id="btnOpenTestModal" class="btn btn-secondary">
             <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
             Test riêng 1 bài
@@ -112,7 +121,7 @@
       <div class="card metric-card">
         <div class="metric-icon icon-total">📄</div>
         <div class="metric-info">
-          <span class="metric-label">Tổng bài</span>
+          <span class="metric-label">Tổng bài viết</span>
           <h3 id="statTotalPosts" class="metric-value">0</h3>
         </div>
       </div>
@@ -146,86 +155,175 @@
       </div>
     </section>
 
-    <!-- Main Content Layout (2 cột: Thống kê người đăng + Bảng bài viết) -->
-    <main class="main-layout">
-      <!-- Cột Trái: Thống kê theo người đăng -->
-      <aside class="panel publisher-panel">
-        <div class="panel-header">
-          <h2>Thống kê người đăng</h2>
-          <button id="btnClearPublisherFilter" class="btn btn-xs btn-outline" style="display: none;">Xem tất cả</button>
-        </div>
-        <div class="table-responsive">
-          <table class="data-table" id="publisherTable">
-            <thead>
-              <tr>
-                <th>Người đăng</th>
-                <th style="text-align: right;">Số bài</th>
-              </tr>
-            </thead>
-            <tbody id="publisherTableBody">
-              <tr>
-                <td colspan="2" class="empty-cell">Chưa có dữ liệu</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </aside>
+    <!-- Navigation Tabs Bar -->
+    <div class="nav-tabs-container">
+      <div class="nav-tabs">
+        <button id="tabBtnBatches" class="nav-tab-btn active">
+          <span>🕒 Lịch sử đợt đồng bộ</span>
+          <span id="tabBatchesCount" class="tab-badge">0</span>
+        </button>
+        <button id="tabBtnPosts" class="nav-tab-btn">
+          <span>📄 Danh sách bài viết</span>
+          <span id="tabPostsCount" class="tab-badge">0</span>
+        </button>
+        <button id="tabBtnPublishers" class="nav-tab-btn">
+          <span>👥 Thống kê người đăng</span>
+          <span id="tabPubsCount" class="tab-badge">0</span>
+        </button>
+      </div>
+      <div style="font-size: 0.8rem; color: var(--text-muted);" id="currentViewNotice">
+        💡 Mỗi lần bấm "Đồng bộ bài viết" sẽ tạo 1 đợt mới để dễ theo dõi.
+      </div>
+    </div>
 
-      <!-- Cột Phải: Bảng bài viết -->
-      <section class="panel posts-panel">
-        <div class="panel-header">
+    <!-- VIEW 1: Lịch sử đợt đồng bộ (Mặc định khi mở trang để không bị rối mắt) -->
+    <section id="viewBatches" class="panel" style="display: block;">
+      <div class="batches-view-header">
+        <div>
+          <h2>Danh sách các đợt đồng bộ bài viết</h2>
+          <p>Dữ liệu được gom nhóm theo từng lần đồng bộ. Bấm "Xem bài viết đợt này" để kiểm tra chi tiết.</p>
+        </div>
+        <button id="btnRefreshBatches" class="btn btn-sm btn-outline">
+          <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+          Làm mới đợt
+        </button>
+      </div>
+      <div id="batchesContainer" class="batches-grid">
+        <!-- Render động bằng JS -->
+        <div class="empty-batches-card">
+          <div class="spinner" style="margin: 0 auto 0.75rem auto;"></div>
+          Đang tải danh sách các đợt đồng bộ...
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 2: Chi tiết bài viết -->
+    <section id="viewPosts" class="panel posts-panel" style="display: none;">
+      <div class="panel-header">
+        <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
           <h2>Danh sách bài viết</h2>
-          <div class="posts-filters">
-            <input type="text" id="filterSearch" placeholder="Tìm nội dung / ID..." class="input-sm">
-            <select id="filterStatus" class="select-sm">
-              <option value="ALL">Tất cả trạng thái</option>
-              <option value="FOUND">Đã xác định (FOUND)</option>
-              <option value="PENDING">Chờ xử lý (PENDING)</option>
-              <option value="NOT_FOUND">Không tìm thấy (NOT_FOUND)</option>
-              <option value="ERROR">Lỗi / Unavailable</option>
+          <div class="batch-filter-selector">
+            <span>Đợt đồng bộ:</span>
+            <select id="filterBatchSelect">
+              <option value="ALL">Tất cả các đợt</option>
             </select>
-            <button id="btnRefreshList" class="btn btn-sm btn-outline">Làm mới</button>
           </div>
         </div>
+        <div class="posts-filters">
+          <input type="text" id="filterSearch" placeholder="Tìm nội dung / ID / Người..." class="input-sm">
+          <select id="filterStatus" class="select-sm">
+            <option value="ALL">Tất cả trạng thái</option>
+            <option value="FOUND">Đã xác định (FOUND)</option>
+            <option value="PENDING">Chờ xử lý (PENDING)</option>
+            <option value="NOT_FOUND">Không tìm thấy (NOT_FOUND)</option>
+            <option value="ERROR">Lỗi / Unavailable</option>
+          </select>
+          <button id="btnRefreshList" class="btn btn-sm btn-outline">Làm mới</button>
+        </div>
+      </div>
 
-        <div class="active-filter-bar" id="activeFilterNotice" style="display: none;">
-          <span>Đang lọc theo người đăng: <strong id="currentFilterPublisherName"></strong></span>
-          <button id="btnRemovePubFilter" class="btn-link">Bỏ lọc ✕</button>
+      <div class="active-filter-bar" id="activeFilterNotice" style="display: none;">
+        <span>Đang lọc theo người đăng: <strong id="currentFilterPublisherName"></strong></span>
+        <button id="btnRemovePubFilter" class="btn-link">Bỏ lọc ✕</button>
+      </div>
+
+      <div class="table-responsive">
+        <table class="data-table" id="postsTable">
+          <thead>
+            <tr>
+              <th style="width: 135px;">Ngày đăng</th>
+              <th style="width: 150px;">Người đăng</th>
+              <th>Nội dung bài viết</th>
+              <th style="width: 130px; text-align: center;">Tương tác</th>
+              <th style="width: 110px; text-align: center;">Trạng thái</th>
+              <th style="width: 70px; text-align: center;">Link</th>
+            </tr>
+          </thead>
+          <tbody id="postsTableBody">
+            <tr>
+              <td colspan="6" class="empty-cell">Chưa có dữ liệu trong khoảng thời gian này.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination -->
+      <div class="pagination-footer">
+        <div class="pagination-info">
+          Hiển thị <span id="pageRangeText">0 - 0</span> / <span id="pageTotalText">0</span> bài
+        </div>
+        <div class="pagination-controls">
+          <button id="btnPrevPage" class="btn btn-sm btn-outline" disabled>Trước</button>
+          <span id="currentPageText" class="page-number">Trang 1 / 1</span>
+          <button id="btnNextPage" class="btn btn-sm btn-outline" disabled>Sau</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 3: Thống kê người đăng -->
+    <section id="viewPublishers" class="panel publisher-panel" style="display: none;">
+      <div class="panel-header">
+        <div>
+          <h2>Bảng xếp hạng người đăng bài</h2>
+          <p class="text-muted">Thống kê số lượng bài viết của từng quản trị viên được trích xuất bởi Playwright</p>
+        </div>
+        <button id="btnClearPublisherFilter" class="btn btn-sm btn-outline" style="display: none;">Xem tất cả bài viết</button>
+      </div>
+      <div class="table-responsive">
+        <table class="data-table" id="publisherTable">
+          <thead>
+            <tr>
+              <th style="width: 60px; text-align: center;">Hạng</th>
+              <th>Người đăng (Quản trị viên)</th>
+              <th style="text-align: right; width: 140px;">Số bài đăng</th>
+              <th style="width: 180px; text-align: center;">Hành động</th>
+            </tr>
+          </thead>
+          <tbody id="publisherTableBody">
+            <tr>
+              <td colspan="4" class="empty-cell">Chưa có dữ liệu người đăng</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <!-- Modal Cài đặt Fanpage & Token -->
+  <div id="settingsModal" class="modal-overlay" style="display: none;">
+    <div class="modal-card" style="max-width: 620px;">
+      <div class="modal-header">
+        <h3>⚙️ Cài đặt Fanpage & Facebook Token</h3>
+        <button id="btnCloseSettingsModal" class="btn-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted" style="line-height: 1.6;">
+          Điền <strong>ID Fanpage</strong> và <strong>Access Token</strong> của bạn. Hệ thống sẽ tự động chuyển đổi User Token sang Page Token nếu cần và lưu vĩnh viễn vào file <code>.env</code> (không bị mất khi khởi động lại server).
+        </p>
+
+        <div class="control-group" style="margin-top: 1rem;">
+          <label for="settingPageId">ID Fanpage (FB_PAGE_ID):</label>
+          <input type="text" id="settingPageId" placeholder="Ví dụ: 778169405386344" class="input-full" style="background: #0f172a; border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-main); padding: 0.6rem; font-family: monospace;">
         </div>
 
-        <div class="table-responsive">
-          <table class="data-table" id="postsTable">
-            <thead>
-              <tr>
-                <th style="width: 135px;">Ngày đăng</th>
-                <th style="width: 150px;">Người đăng</th>
-                <th>Nội dung bài viết</th>
-                <th style="width: 130px; text-align: center;">Tương tác</th>
-                <th style="width: 110px; text-align: center;">Trạng thái</th>
-                <th style="width: 70px; text-align: center;">Link</th>
-              </tr>
-            </thead>
-            <tbody id="postsTableBody">
-              <tr>
-                <td colspan="6" class="empty-cell">Chưa có dữ liệu trong khoảng thời gian này.</td>
-              </tr>
-            </tbody>
-          </table>
+        <div class="control-group" style="margin-top: 1rem;">
+          <label for="settingAccessToken">Facebook Access Token (FB_PAGE_ACCESS_TOKEN):</label>
+          <textarea id="settingAccessToken" rows="4" placeholder="Dán mã Token (bắt đầu bằng EAA...) từ Meta Graph API Explorer vào đây..." class="input-full" style="background: #0f172a; border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-main); padding: 0.6rem; font-family: monospace; font-size: 13px; line-break: anywhere;"></textarea>
+          <small class="text-muted" style="display: block; margin-top: 4px;">
+            Lấy token tại: <a href="https://developers.facebook.com/tools/explorer/" target="_blank" style="color: var(--primary); text-decoration: underline;">Meta Graph API Explorer</a>.
+          </small>
         </div>
 
-        <!-- Pagination -->
-        <div class="pagination-footer">
-          <div class="pagination-info">
-            Hiển thị <span id="pageRangeText">0 - 0</span> / <span id="pageTotalText">0</span> bài
-          </div>
-          <div class="pagination-controls">
-            <button id="btnPrevPage" class="btn btn-sm btn-outline" disabled>Trước</button>
-            <span id="currentPageText" class="page-number">Trang 1 / 1</span>
-            <button id="btnNextPage" class="btn btn-sm btn-outline" disabled>Sau</button>
-          </div>
-        </div>
-      </section>
-    </main>
+        <div id="settingResultBox" class="test-result-box" style="display: none;"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnCancelSettingsModal" class="btn btn-secondary">Đóng</button>
+        <button id="btnSaveSettings" class="btn btn-primary">
+          <span id="saveSettingsSpinner" class="spinner-sm" style="display: none;"></span>
+          💾 Lưu Cấu Hình (.env)
+        </button>
+      </div>
+    </div>
   </div>
 
   <!-- Modal Test riêng 1 bài -->
@@ -241,9 +339,7 @@
           <label for="testPostUrl">URL bài viết Facebook:</label>
           <input type="url" id="testPostUrl" placeholder="https://www.facebook.com/..." class="input-full">
         </div>
-        <div id="testResultBox" class="test-result-box" style="display: none;">
-          <!-- Kết quả test hiển thị ở đây -->
-        </div>
+        <div id="testResultBox" class="test-result-box" style="display: none;"></div>
       </div>
       <div class="modal-footer">
         <button id="btnCancelModal" class="btn btn-secondary">Đóng</button>

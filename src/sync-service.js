@@ -24,9 +24,23 @@ async function syncPosts(since, until, options = {}) {
     return { total: 0, insertedCount: 0, updatedCount: 0 };
   }
 
-  const result = db.upsertPosts(posts);
-  console.log(`[SyncService] Lưu DB thành công: Thêm mới ${result.insertedCount} bài, Cập nhật ${result.updatedCount} bài.`);
-  return result;
+  const batchId = `batch_${Date.now()}`;
+  const batchName = `Đợt ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} ngày ${new Date().toLocaleDateString('vi-VN')}`;
+
+  const result = db.upsertPosts(posts, batchId);
+  db.createSyncBatch({
+    id: batchId,
+    batch_name: batchName,
+    since_date: since,
+    until_date: until,
+    total_posts: posts.length,
+    inserted_posts: result.insertedCount,
+    updated_posts: result.updatedCount,
+    note: `Lấy ${posts.length} bài viết từ ${since} đến ${until}`
+  });
+
+  console.log(`[SyncService] Lưu DB thành công đợt ${batchId}: Thêm mới ${result.insertedCount} bài, Cập nhật ${result.updatedCount} bài.`);
+  return { ...result, batchId, batchName };
 }
 
 /**

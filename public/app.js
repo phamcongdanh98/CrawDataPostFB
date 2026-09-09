@@ -2,17 +2,21 @@
 const state = {
   since: '', // Định dạng YYYY-MM-DD dùng cho API
   until: '', // Định dạng YYYY-MM-DD dùng cho API
+  batchId: 'ALL',
   publisher: '',
   status: 'ALL',
   search: '',
   page: 1,
   limit: 20,
   totalPages: 1,
+  currentTab: 'batches',
   isJobRunning: false,
-  pollingInterval: null
+  pollingInterval: null,
+  configuredPageId: null,
+  configuredPageName: null
 };
 
-// DOM Elements
+// DOM Elements: Form & Controls
 const sinceDateInput = document.getElementById('sinceDate');
 const untilDateInput = document.getElementById('untilDate');
 const sinceDatePicker = document.getElementById('sinceDatePicker');
@@ -27,6 +31,7 @@ const btnSyncAll = document.getElementById('btnSyncAll');
 const btnExportExcel = document.getElementById('btnExportExcel');
 const btnExportCsv = document.getElementById('btnExportCsv');
 
+// Progress Notification Bar
 const progressSection = document.getElementById('progressSection');
 const progressBarFill = document.getElementById('progressBarFill');
 const progressCountText = document.getElementById('progressCountText');
@@ -37,30 +42,65 @@ const progNotFound = document.getElementById('progNotFound');
 const progErrors = document.getElementById('progErrors');
 const btnStopJob = document.getElementById('btnStopJob');
 
+// Metrics Cards
 const statTotalPosts = document.getElementById('statTotalPosts');
 const statFound = document.getElementById('statFound');
 const statPending = document.getElementById('statPending');
 const statErrors = document.getElementById('statErrors');
 const statPublishersCount = document.getElementById('statPublishersCount');
 
-const publisherTableBody = document.getElementById('publisherTableBody');
-const btnClearPublisherFilter = document.getElementById('btnClearPublisherFilter');
-const activeFilterNotice = document.getElementById('activeFilterNotice');
-const currentFilterPublisherName = document.getElementById('currentFilterPublisherName');
-const btnRemovePubFilter = document.getElementById('btnRemovePubFilter');
+// Navigation Tabs
+const tabBtnBatches = document.getElementById('tabBtnBatches');
+const tabBtnPosts = document.getElementById('tabBtnPosts');
+const tabBtnPublishers = document.getElementById('tabBtnPublishers');
+const tabBatchesCount = document.getElementById('tabBatchesCount');
+const tabPostsCount = document.getElementById('tabPostsCount');
+const tabPubsCount = document.getElementById('tabPubsCount');
 
+// Views
+const viewBatches = document.getElementById('viewBatches');
+const viewPosts = document.getElementById('viewPosts');
+const viewPublishers = document.getElementById('viewPublishers');
+
+// View 1: Batches
+const batchesContainer = document.getElementById('batchesContainer');
+const btnRefreshBatches = document.getElementById('btnRefreshBatches');
+
+// View 2: Posts Table
 const postsTableBody = document.getElementById('postsTableBody');
+const filterBatchSelect = document.getElementById('filterBatchSelect');
 const filterSearch = document.getElementById('filterSearch');
 const filterStatus = document.getElementById('filterStatus');
 const btnRefreshList = document.getElementById('btnRefreshList');
-
+const activeFilterNotice = document.getElementById('activeFilterNotice');
+const currentFilterPublisherName = document.getElementById('currentFilterPublisherName');
+const btnRemovePubFilter = document.getElementById('btnRemovePubFilter');
 const pageRangeText = document.getElementById('pageRangeText');
 const pageTotalText = document.getElementById('pageTotalText');
 const currentPageText = document.getElementById('currentPageText');
 const btnPrevPage = document.getElementById('btnPrevPage');
 const btnNextPage = document.getElementById('btnNextPage');
 
-// Modal Elements
+// View 3: Publishers Table
+const publisherTableBody = document.getElementById('publisherTableBody');
+const btnClearPublisherFilter = document.getElementById('btnClearPublisherFilter');
+
+// Header Status
+const pageConnectedBadge = document.getElementById('pageConnectedBadge');
+const headerPageInfo = document.getElementById('headerPageInfo');
+
+// Settings Modal Elements
+const btnOpenSettingsModal = document.getElementById('btnOpenSettingsModal');
+const settingsModal = document.getElementById('settingsModal');
+const btnCloseSettingsModal = document.getElementById('btnCloseSettingsModal');
+const btnCancelSettingsModal = document.getElementById('btnCancelSettingsModal');
+const btnSaveSettings = document.getElementById('btnSaveSettings');
+const settingPageId = document.getElementById('settingPageId');
+const settingAccessToken = document.getElementById('settingAccessToken');
+const settingResultBox = document.getElementById('settingResultBox');
+const saveSettingsSpinner = document.getElementById('saveSettingsSpinner');
+
+// Test 1 Post Modal Elements
 const btnOpenTestModal = document.getElementById('btnOpenTestModal');
 const testPostModal = document.getElementById('testPostModal');
 const btnCloseModal = document.getElementById('btnCloseModal');
@@ -108,188 +148,358 @@ function dateToYmd(dateObj) {
 }
 
 /**
- * Tự động format dd/mm/yyyy khi gõ
+ * Tự động gắn mask khi nhập ngày tháng dd/mm/yyyy
  */
-function applyDateMask(input) {
-  input.addEventListener('input', (e) => {
-    let val = input.value.replace(/\D/g, '');
-    if (val.length > 8) val = val.substring(0, 8);
-    let formatted = '';
-    if (val.length > 4) {
-      formatted = `${val.substring(0, 2)}/${val.substring(2, 4)}/${val.substring(4)}`;
-    } else if (val.length > 2) {
-      formatted = `${val.substring(0, 2)}/${val.substring(2)}`;
+function applyDateInputMask(inputEl) {
+  inputEl.addEventListener('input', (e) => {
+    let v = e.target.value.replace(/\D/g, '');
+    if (v.length > 8) v = v.substring(0, 8);
+
+    if (v.length >= 5) {
+      e.target.value = `${v.substring(0, 2)}/${v.substring(2, 4)}/${v.substring(4)}`;
+    } else if (v.length >= 3) {
+      e.target.value = `${v.substring(0, 2)}/${v.substring(2)}`;
     } else {
-      formatted = val;
+      e.target.value = v;
     }
-    input.value = formatted;
+  });
+
+  inputEl.addEventListener('change', () => {
+    updateExportLinks();
   });
 }
 
 /**
- * Khởi tạo ngày mặc định chuẩn dd/mm/yyyy (60 ngày trước đến hôm nay)
+ * Đồng bộ Date Picker ẩn với input text dd/mm/yyyy
  */
+function setupDatePickerSync(textInput, nativePicker, calendarBtn) {
+  applyDateInputMask(textInput);
+
+  calendarBtn.addEventListener('click', () => {
+    const ymd = dmyToYmd(textInput.value.trim());
+    if (ymd && ymd.length === 10) {
+      nativePicker.value = ymd;
+    }
+    if (typeof nativePicker.showPicker === 'function') {
+      try { nativePicker.showPicker(); } catch (e) { nativePicker.click(); }
+    } else {
+      nativePicker.click();
+    }
+  });
+
+  nativePicker.addEventListener('change', () => {
+    if (nativePicker.value) {
+      textInput.value = ymdToDmy(nativePicker.value);
+      updateExportLinks();
+    }
+  });
+
+  textInput.addEventListener('blur', () => {
+    const ymd = dmyToYmd(textInput.value.trim());
+    if (ymd && ymd.length === 10) {
+      nativePicker.value = ymd;
+    }
+  });
+}
+
 function initDefaultDates() {
-  const today = new Date();
-  const past = new Date();
-  past.setDate(today.getDate() - 60);
+  const now = new Date();
+  const twoMonthsAgo = new Date();
+  twoMonthsAgo.setMonth(now.getMonth() - 2);
 
-  const sinceDmy = dateToDmy(past);
-  const untilDmy = dateToDmy(today);
+  const defaultSinceDmy = dateToDmy(twoMonthsAgo);
+  const defaultUntilDmy = dateToDmy(now);
 
-  sinceDateInput.value = sinceDmy;
-  untilDateInput.value = untilDmy;
+  sinceDateInput.value = defaultSinceDmy;
+  untilDateInput.value = defaultUntilDmy;
+  sinceDatePicker.value = dateToYmd(twoMonthsAgo);
+  untilDatePicker.value = dateToYmd(now);
 
-  sinceDatePicker.value = dateToYmd(past);
-  untilDatePicker.value = dateToYmd(today);
+  state.since = dateToYmd(twoMonthsAgo);
+  state.until = dateToYmd(now);
 
-  state.since = dateToYmd(past);
-  state.until = dateToYmd(today);
-
-  applyDateMask(sinceDateInput);
-  applyDateMask(untilDateInput);
-
-  // Đồng bộ picker sang text
-  btnSinceCalendar.addEventListener('click', () => {
-    try { sinceDatePicker.showPicker(); } catch (e) { sinceDatePicker.click(); }
-  });
-  sinceDatePicker.addEventListener('change', () => {
-    if (sinceDatePicker.value) {
-      sinceDateInput.value = ymdToDmy(sinceDatePicker.value);
-      state.since = sinceDatePicker.value;
-      state.page = 1;
-      updateExportLink();
-      fetchPosts();
-    }
-  });
-
-  btnUntilCalendar.addEventListener('click', () => {
-    try { untilDatePicker.showPicker(); } catch (e) { untilDatePicker.click(); }
-  });
-  untilDatePicker.addEventListener('change', () => {
-    if (untilDatePicker.value) {
-      untilDateInput.value = ymdToDmy(untilDatePicker.value);
-      state.until = untilDatePicker.value;
-      state.page = 1;
-      updateExportLink();
-      fetchPosts();
-    }
-  });
-
-  updateExportLink();
+  setupDatePickerSync(sinceDateInput, sinceDatePicker, btnSinceCalendar);
+  setupDatePickerSync(untilDateInput, untilDatePicker, btnUntilCalendar);
 }
 
 /**
- * Cập nhật đường link xuất Excel và CSV theo bộ lọc hiện tại
+ * Quản lý chuyển đổi Tabs (Lịch sử đợt / Bài viết / Người đăng)
  */
-function updateExportLink() {
-  const params = new URLSearchParams();
-  if (state.since) params.set('since', state.since);
-  if (state.until) params.set('until', state.until);
-  if (state.publisher) params.set('publisher', state.publisher);
-  if (state.status && state.status !== 'ALL') params.set('status', state.status);
-  if (state.search) params.set('search', state.search);
+function switchTab(tabName) {
+  state.currentTab = tabName;
 
-  btnExportCsv.href = `/api/export.csv?${params.toString()}`;
-  if (btnExportExcel) {
-    btnExportExcel.href = `/api/export.xlsx?${params.toString()}`;
+  tabBtnBatches.classList.toggle('active', tabName === 'batches');
+  tabBtnPosts.classList.toggle('active', tabName === 'posts');
+  tabBtnPublishers.classList.toggle('active', tabName === 'publishers');
+
+  viewBatches.style.display = tabName === 'batches' ? 'block' : 'none';
+  viewPosts.style.display = tabName === 'posts' ? 'block' : 'none';
+  viewPublishers.style.display = tabName === 'publishers' ? 'block' : 'none';
+
+  if (tabName === 'batches') {
+    fetchBatches();
+  } else if (tabName === 'posts') {
+    fetchPosts();
+  } else if (tabName === 'publishers') {
+    fetchPublishers();
   }
 }
 
+tabBtnBatches.addEventListener('click', () => switchTab('batches'));
+tabBtnPosts.addEventListener('click', () => switchTab('posts'));
+tabBtnPublishers.addEventListener('click', () => switchTab('publishers'));
+
 /**
- * Kiểm tra trạng thái cấu hình hệ thống
+ * Kiểm tra trạng thái cấu hình backend
  */
 async function checkConfigStatus() {
   try {
     const res = await fetch('/api/config-status');
     const data = await res.json();
-    const bannersContainer = document.getElementById('statusBanners');
-    bannersContainer.innerHTML = '';
+    const banners = document.getElementById('statusBanners');
+    banners.innerHTML = '';
+
+    state.configuredPageId = data.pageId;
+    if (settingPageId) settingPageId.value = data.pageId || '';
+
+    if (data.pageId) {
+      pageConnectedBadge.style.display = 'inline-flex';
+      headerPageInfo.textContent = `Fanpage ID: ${data.pageId}`;
+    }
 
     if (!data.isApiConfigured) {
-      const banner = document.createElement('div');
-      banner.className = 'banner banner-warning';
-      banner.innerHTML = `
-        <strong>⚠️ Chưa cấu hình API:</strong> Bạn chưa nhập <code>FB_PAGE_ID</code> và <code>FB_PAGE_ACCESS_TOKEN</code> trong file <code>.env</code>. Vui lòng cập nhật để sử dụng tính năng đồng bộ bài viết.
+      banners.innerHTML += `
+        <div class="banner banner-warning">
+          <span>⚠️ <strong>Chưa hoàn tất cấu hình Facebook:</strong> Vui lòng bấm <strong>"Cài đặt Fanpage & Token"</strong> ở trên để nhập ID Fanpage và Access Token.</span>
+        </div>
       `;
-      bannersContainer.appendChild(banner);
     }
 
     if (!data.isProfilePresent) {
-      const banner = document.createElement('div');
-      banner.className = 'banner banner-info';
-      banner.innerHTML = `
-        <strong>ℹ️ Chưa có phiên đăng nhập:</strong> Hãy mở Terminal và chạy lệnh <code>npm run login</code> để đăng nhập tài khoản Facebook quản trị và chuyển sang tư cách Fanpage.
+      banners.innerHTML += `
+        <div class="banner banner-info">
+          <span>ℹ️ <strong>Chưa có phiên đăng nhập Facebook:</strong> Hãy chạy lệnh <code>npm run login</code> trong terminal để mở Chromium đăng nhập Facebook và chuyển sang Fanpage.</span>
+        </div>
       `;
-      bannersContainer.appendChild(banner);
     }
   } catch (err) {
-    console.error('Lỗi khi kiểm tra cấu hình:', err);
+    console.error('Lỗi khi lấy config status:', err);
   }
 }
 
 /**
- * Lấy dữ liệu thống kê tổng quan
+ * Cập nhật đường dẫn xuất CSV / Excel
+ */
+function updateExportLinks() {
+  const sinceVal = dmyToYmd(sinceDateInput.value.trim());
+  const untilVal = dmyToYmd(untilDateInput.value.trim());
+
+  const params = new URLSearchParams();
+  if (sinceVal) params.set('since', sinceVal);
+  if (untilVal) params.set('until', untilVal);
+  if (state.batchId && state.batchId !== 'ALL') params.set('batchId', state.batchId);
+  if (state.publisher) params.set('publisher', state.publisher);
+  if (state.status !== 'ALL') params.set('status', state.status);
+  if (state.search) params.set('search', state.search);
+
+  const query = params.toString() ? `?${params.toString()}` : '';
+  btnExportExcel.href = `/api/export.xlsx${query}`;
+  btnExportCsv.href = `/api/export.csv${query}`;
+}
+
+/**
+ * Lấy danh sách các đợt đồng bộ bài viết (Batches)
+ */
+async function fetchBatches() {
+  try {
+    const res = await fetch('/api/batches');
+    const batches = await res.json();
+
+    tabBatchesCount.textContent = batches.length || 0;
+
+    // Cập nhật dropdown lọc đợt đồng bộ trên viewPosts
+    const currentSelected = filterBatchSelect.value;
+    filterBatchSelect.innerHTML = '<option value="ALL">Tất cả các đợt</option>';
+    batches.forEach((b) => {
+      const opt = document.createElement('option');
+      opt.value = b.id;
+      opt.textContent = `${b.batch_name} (${b.actual_posts_count || b.total_posts} bài)`;
+      if (b.id === currentSelected) opt.selected = true;
+      filterBatchSelect.appendChild(opt);
+    });
+
+    if (!batches || batches.length === 0) {
+      batchesContainer.innerHTML = `
+        <div class="empty-batches-card">
+          <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">📭</div>
+          <h3>Chưa có đợt đồng bộ nào</h3>
+          <p style="margin-top: 0.4rem; color: var(--text-muted);">
+            Hãy chọn khoảng ngày bên trên và bấm <strong>"Đồng bộ bài viết"</strong> để tải bài viết từ Facebook.
+          </p>
+        </div>
+      `;
+      return;
+    }
+
+    batchesContainer.innerHTML = '';
+    batches.forEach((b, idx) => {
+      const isLatest = idx === 0;
+      const total = b.actual_posts_count || b.total_posts || 0;
+      const found = b.found_count || 0;
+      const pending = b.pending_count || 0;
+      const notFound = b.not_found_count || 0;
+      const pct = total > 0 ? Math.round((found / total) * 100) : 0;
+
+      const card = document.createElement('div');
+      card.className = `batch-card ${isLatest ? 'latest-batch' : ''}`;
+      card.innerHTML = `
+        <div class="batch-card-top">
+          <div>
+            <div class="batch-title">
+              <span>🕒</span> ${escapeHtml(b.batch_name)}
+            </div>
+            <div class="batch-time">Đồng bộ lúc: ${escapeHtml(b.synced_at)}</div>
+          </div>
+          <div class="batch-range-badge" title="Khoảng thời gian quét">
+            🗓️ ${escapeHtml(b.since_date || 'N/A')} ➜ ${escapeHtml(b.until_date || 'N/A')}
+          </div>
+        </div>
+
+        <div class="batch-stats-chips">
+          <div class="batch-stat-box">
+            <span class="batch-stat-val" style="color: #60a5fa;">${total}</span>
+            <span class="batch-stat-lbl">Tổng bài</span>
+          </div>
+          <div class="batch-stat-box">
+            <span class="batch-stat-val text-success">${found}</span>
+            <span class="batch-stat-lbl">Đã tìm thấy (${pct}%)</span>
+          </div>
+          <div class="batch-stat-box">
+            <span class="batch-stat-val text-warning">${pending}</span>
+            <span class="batch-stat-lbl">Chờ xử lý</span>
+          </div>
+        </div>
+
+        <div class="batch-interactions-row">
+          <span>❤️ <strong>${(b.total_likes || 0).toLocaleString()}</strong> thích</span>
+          <span>💬 <strong>${(b.total_comments || 0).toLocaleString()}</strong> bình luận</span>
+          <span>🔁 <strong>${(b.total_shares || 0).toLocaleString()}</strong> chia sẻ</span>
+        </div>
+
+        <div class="batch-card-actions">
+          <button class="btn btn-sm btn-primary btn-view-batch" data-batch-id="${escapeHtml(b.id)}">
+            👁️ Xem ${total} bài viết
+          </button>
+          <a href="/api/export.xlsx?batchId=${escapeHtml(b.id)}" class="btn btn-sm btn-excel" download>
+            📊 Xuất Excel
+          </a>
+        </div>
+      `;
+
+      card.querySelector('.btn-view-batch').addEventListener('click', () => {
+        state.batchId = b.id;
+        filterBatchSelect.value = b.id;
+        switchTab('posts');
+      });
+
+      batchesContainer.appendChild(card);
+    });
+  } catch (err) {
+    batchesContainer.innerHTML = `<div class="empty-batches-card" style="color: var(--danger);">Lỗi tải đợt đồng bộ: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+btnRefreshBatches.addEventListener('click', fetchBatches);
+
+filterBatchSelect.addEventListener('change', (e) => {
+  state.batchId = e.target.value;
+  state.page = 1;
+  updateExportLinks();
+  fetchPosts();
+});
+
+/**
+ * Lấy số liệu thống kê tổng thể
  */
 async function fetchStats() {
   try {
     const res = await fetch('/api/stats');
     const data = await res.json();
 
-    statTotalPosts.textContent = data.totalPosts.toLocaleString('vi-VN');
-    statFound.textContent = data.found.toLocaleString('vi-VN');
-    statPending.textContent = data.pending.toLocaleString('vi-VN');
-    statErrors.textContent = data.errors.toLocaleString('vi-VN');
-    statPublishersCount.textContent = data.publisherCount.toLocaleString('vi-VN');
+    statTotalPosts.textContent = (data.totalPosts || 0).toLocaleString();
+    statFound.textContent = (data.found || 0).toLocaleString();
+    statPending.textContent = (data.pending || 0).toLocaleString();
+    statErrors.textContent = (data.errors || 0).toLocaleString();
+    statPublishersCount.textContent = (data.publisherCount || 0).toLocaleString();
+
+    tabPostsCount.textContent = data.totalPosts || 0;
+    tabPubsCount.textContent = data.publisherCount || 0;
 
     renderPublisherTable(data.publishers || []);
   } catch (err) {
-    console.error('Lỗi khi lấy stats:', err);
+    console.error('Lỗi khi tải thống kê:', err);
   }
 }
 
 /**
- * Hiển thị bảng danh sách người đăng
+ * Render bảng người đăng bài (View 3 và Aside)
  */
 function renderPublisherTable(publishers) {
+  if (!publisherTableBody) return;
   publisherTableBody.innerHTML = '';
 
   if (publishers.length === 0) {
-    publisherTableBody.innerHTML = `<tr><td colspan="2" class="empty-cell">Chưa có dữ liệu người đăng</td></tr>`;
+    publisherTableBody.innerHTML = `
+      <tr>
+        <td colspan="4" class="empty-cell">Chưa có dữ liệu người đăng bài</td>
+      </tr>
+    `;
     return;
   }
 
-  publishers.forEach((pub) => {
+  const medals = ['🥇 #1', '🥈 #2', '🥉 #3'];
+
+  publishers.forEach((p, idx) => {
+    const isSelected = state.publisher === p.publisher_name;
+    const rankBadge = idx < 3 ? `<span style="font-weight: 700; color: #fbbf24;">${medals[idx]}</span>` : `#${idx + 1}`;
+
     const tr = document.createElement('tr');
-    tr.className = `clickable-row ${state.publisher === pub.publisher_name ? 'selected' : ''}`;
-    tr.title = `Bấm để lọc bài viết của ${pub.publisher_name}`;
+    tr.className = isSelected ? 'row-selected' : '';
     tr.innerHTML = `
-      <td><strong>${escapeHtml(pub.publisher_name)}</strong></td>
-      <td style="text-align: right;"><span class="badge badge-info">${pub.count}</span></td>
+      <td style="text-align: center;">${rankBadge}</td>
+      <td>
+        <strong style="color: #fff;">${escapeHtml(p.publisher_name)}</strong>
+      </td>
+      <td style="text-align: right;">
+        <span class="badge badge-success" style="font-size: 0.9rem; font-weight: 700;">${p.count.toLocaleString()} bài</span>
+      </td>
+      <td style="text-align: center;">
+        <button class="btn btn-xs btn-outline btn-filter-pub">
+          ${isSelected ? 'Bỏ chọn' : 'Xem bài viết'}
+        </button>
+      </td>
     `;
 
-    tr.addEventListener('click', () => {
-      setPublisherFilter(pub.publisher_name);
+    tr.querySelector('.btn-filter-pub').addEventListener('click', () => {
+      if (state.publisher === p.publisher_name) {
+        clearPublisherFilter();
+      } else {
+        applyPublisherFilter(p.publisher_name);
+        switchTab('posts');
+      }
     });
 
     publisherTableBody.appendChild(tr);
   });
 }
 
-function setPublisherFilter(name) {
-  if (state.publisher === name) {
-    clearPublisherFilter();
-    return;
-  }
-
+function applyPublisherFilter(name) {
   state.publisher = name;
   state.page = 1;
-  currentFilterPublisherName.textContent = name;
   activeFilterNotice.style.display = 'flex';
+  currentFilterPublisherName.textContent = name;
   btnClearPublisherFilter.style.display = 'inline-block';
-
-  updateExportLink();
-  fetchStats();
+  updateExportLinks();
   fetchPosts();
 }
 
@@ -298,26 +508,45 @@ function clearPublisherFilter() {
   state.page = 1;
   activeFilterNotice.style.display = 'none';
   btnClearPublisherFilter.style.display = 'none';
-
-  updateExportLink();
-  fetchStats();
+  updateExportLinks();
   fetchPosts();
+  fetchStats();
 }
 
+btnRemovePubFilter.addEventListener('click', clearPublisherFilter);
+btnClearPublisherFilter.addEventListener('click', clearPublisherFilter);
+
 /**
- * Lấy danh sách bài viết
+ * Lấy danh sách bài viết cho View 2
  */
 async function fetchPosts() {
+  const sinceVal = dmyToYmd(sinceDateInput.value.trim());
+  const untilVal = dmyToYmd(untilDateInput.value.trim());
+
+  state.since = sinceVal;
+  state.until = untilVal;
+  updateExportLinks();
+
   const params = new URLSearchParams({
     page: state.page,
-    limit: state.limit,
-    since: state.since,
-    until: state.until
+    limit: state.limit
   });
 
+  if (state.batchId && state.batchId !== 'ALL') params.set('batchId', state.batchId);
+  if (state.since) params.set('since', state.since);
+  if (state.until) params.set('until', state.until);
   if (state.publisher) params.set('publisher', state.publisher);
-  if (state.status && state.status !== 'ALL') params.set('status', state.status);
+  if (state.status !== 'ALL') params.set('status', state.status);
   if (state.search) params.set('search', state.search);
+
+  postsTableBody.innerHTML = `
+    <tr>
+      <td colspan="6" class="empty-cell">
+        <div class="spinner" style="margin: 0.5rem auto;"></div>
+        Đang tải bài viết...
+      </td>
+    </tr>
+  `;
 
   try {
     const res = await fetch(`/api/posts?${params.toString()}`);
@@ -325,67 +554,66 @@ async function fetchPosts() {
 
     state.totalPages = data.totalPages || 1;
     renderPostsTable(data.items || []);
-    updatePagination(data);
+    renderPagination(data.total || 0);
   } catch (err) {
-    console.error('Lỗi khi lấy posts:', err);
+    postsTableBody.innerHTML = `
+      <tr>
+        <td colspan="6" class="empty-cell text-danger">Lỗi khi tải bài viết: ${escapeHtml(err.message)}</td>
+      </tr>
+    `;
   }
 }
 
-/**
- * Render bảng bài viết kèm tương tác và ngày định dạng dd/mm/yyyy
- */
-function renderPostsTable(posts) {
+function renderPostsTable(items) {
   postsTableBody.innerHTML = '';
 
-  if (posts.length === 0) {
+  if (items.length === 0) {
     postsTableBody.innerHTML = `
       <tr>
-        <td colspan="6" class="empty-cell">Chưa có bài viết nào trong khoảng thời gian hoặc điều kiện lọc này.</td>
+        <td colspan="6" class="empty-cell">Không tìm thấy bài viết nào phù hợp.</td>
       </tr>
     `;
     return;
   }
 
-  posts.forEach((p) => {
+  items.forEach((p) => {
     const tr = document.createElement('tr');
 
-    // Format ngày giờ Việt Nam chuẩn dd/mm/yyyy HH:mm:ss
-    const formattedDate = formatDateTimeVN(p.created_time);
+    let statusBadge = '';
+    if (p.publisher_status === 'FOUND') {
+      statusBadge = `<span class="badge badge-success">FOUND</span>`;
+    } else if (p.publisher_status === 'PENDING') {
+      statusBadge = `<span class="badge badge-warning">PENDING</span>`;
+    } else if (p.publisher_status === 'NOT_FOUND') {
+      statusBadge = `<span class="badge badge-secondary">NOT_FOUND</span>`;
+    } else {
+      statusBadge = `<span class="badge badge-danger">${escapeHtml(p.publisher_status)}</span>`;
+    }
 
-    // Trạng thái badge
-    const badge = getStatusBadge(p.publisher_status);
-
-    // Người đăng link hoặc text
-    let publisherDisplay = '<span class="text-dim">-</span>';
-    if (p.publisher_name) {
+    let publisherHtml = '<span class="text-muted">Chưa xác định</span>';
+    if (p.publisher_status === 'FOUND' && p.publisher_name) {
       if (p.publisher_profile_url) {
-        publisherDisplay = `<a href="${p.publisher_profile_url}" target="_blank" class="publisher-link">${escapeHtml(p.publisher_name)} ↗</a>`;
+        publisherHtml = `<a href="${escapeHtml(p.publisher_profile_url)}" target="_blank" class="publisher-link" title="Xem trang cá nhân">${escapeHtml(p.publisher_name)}</a>`;
       } else {
-        publisherDisplay = `<strong>${escapeHtml(p.publisher_name)}</strong>`;
+        publisherHtml = `<strong class="text-success">${escapeHtml(p.publisher_name)}</strong>`;
       }
     }
 
-    const previewMsg = p.message ? escapeHtml(p.message) : '<em class="text-dim">(Không có nội dung văn bản)</em>';
-
-    // Badge tương tác
-    const likesCount = p.likes_count || 0;
-    const commentsCount = p.comments_count || 0;
-    const sharesCount = p.shares_count || 0;
+    const formattedDate = formatVnDateDisplay(p.created_time);
+    const messagePreview = p.message ? escapeHtml(truncateText(p.message, 120)) : '<em class="text-dim">Không có nội dung chữ</em>';
 
     tr.innerHTML = `
-      <td style="white-space: nowrap; font-size: 0.8rem; color: var(--text-muted);">${formattedDate}</td>
-      <td>${publisherDisplay}</td>
-      <td><div class="post-preview-text" title="${escapeHtml(p.message || '')}">${previewMsg}</div></td>
-      <td style="text-align: center;">
-        <div class="interactions-cell">
-          <span class="stat-pill pill-like" title="Lượt thích / cảm xúc">👍 ${likesCount}</span>
-          <span class="stat-pill pill-comment" title="Bình luận">💬 ${commentsCount}</span>
-          <span class="stat-pill pill-share" title="Chia sẻ">🔄 ${sharesCount}</span>
-        </div>
+      <td style="white-space: nowrap; font-size: 0.85rem; color: var(--text-dim);">${formattedDate}</td>
+      <td>${publisherHtml}</td>
+      <td title="${escapeHtml(p.message || '')}">${messagePreview}</td>
+      <td style="text-align: center; white-space: nowrap;">
+        <span class="interaction-pill" title="Lượt thích">❤️ ${p.likes_count || 0}</span>
+        <span class="interaction-pill" title="Bình luận">💬 ${p.comments_count || 0}</span>
+        <span class="interaction-pill" title="Chia sẻ">🔁 ${p.shares_count || 0}</span>
       </td>
-      <td style="text-align: center;">${badge}</td>
+      <td style="text-align: center;">${statusBadge}</td>
       <td style="text-align: center;">
-        <a href="${p.permalink_url}" target="_blank" class="post-link" title="Mở trên Facebook">Mở ↗</a>
+        <a href="${escapeHtml(p.permalink_url)}" target="_blank" class="btn btn-xs btn-outline" title="Mở trên Facebook">🔗</a>
       </td>
     `;
 
@@ -393,152 +621,17 @@ function renderPostsTable(posts) {
   });
 }
 
-function getStatusBadge(status) {
-  switch (status) {
-    case 'FOUND':
-      return '<span class="badge badge-success">Đã xác định</span>';
-    case 'PENDING':
-      return '<span class="badge badge-warning">Chờ xử lý</span>';
-    case 'NOT_FOUND':
-      return '<span class="badge badge-secondary">Không tìm thấy</span>';
-    case 'LOGIN_REQUIRED':
-      return '<span class="badge badge-danger">Cần đăng nhập</span>';
-    case 'POST_UNAVAILABLE':
-      return '<span class="badge badge-danger">Không khả dụng</span>';
-    case 'ERROR':
-    default:
-      return '<span class="badge badge-danger">Lỗi</span>';
-  }
-}
-
-/**
- * Format ngày giờ Việt Nam chuẩn dd/mm/yyyy HH:mm:ss
- */
-function formatDateTimeVN(utcStr) {
-  if (!utcStr) return '-';
-  try {
-    const d = new Date(utcStr);
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-    const hour = String(d.getHours()).padStart(2, '0');
-    const min = String(d.getMinutes()).padStart(2, '0');
-    const sec = String(d.getSeconds()).padStart(2, '0');
-    return `${day}/${month}/${year} ${hour}:${min}:${sec}`;
-  } catch (e) {
-    return utcStr;
-  }
-}
-
-function updatePagination(data) {
-  const { total, page, limit, totalPages } = data;
-
-  const start = total === 0 ? 0 : (page - 1) * limit + 1;
-  const end = Math.min(page * limit, total);
+function renderPagination(total) {
+  const start = total === 0 ? 0 : (state.page - 1) * state.limit + 1;
+  const end = Math.min(state.page * state.limit, total);
 
   pageRangeText.textContent = `${start} - ${end}`;
-  pageTotalText.textContent = total.toLocaleString('vi-VN');
-  currentPageText.textContent = `Trang ${page} / ${totalPages}`;
+  pageTotalText.textContent = total.toLocaleString();
+  currentPageText.textContent = `Trang ${state.page} / ${state.totalPages}`;
 
-  btnPrevPage.disabled = page <= 1;
-  btnNextPage.disabled = page >= totalPages;
+  btnPrevPage.disabled = state.page <= 1;
+  btnNextPage.disabled = state.page >= state.totalPages;
 }
-
-/**
- * Polling tiến độ worker mỗi 1 giây
- */
-function startJobPolling() {
-  if (state.pollingInterval) return;
-
-  progressSection.style.display = 'block';
-
-  state.pollingInterval = setInterval(async () => {
-    try {
-      const res = await fetch('/api/status');
-      const job = await res.json();
-
-      if (job.isRunning) {
-        state.isJobRunning = true;
-        const percent = job.total > 0 ? Math.round((job.processed / job.total) * 100) : 0;
-        progressBarFill.style.width = `${percent}%`;
-        progressCountText.textContent = `${job.processed} / ${job.total} (${percent}%)`;
-        progressCurrentMsg.textContent = job.currentPostMessage || '-';
-        progressCurrentPub.textContent = job.currentPublisher || '-';
-        progFound.textContent = job.found;
-        progNotFound.textContent = job.notFound;
-        progErrors.textContent = job.errors;
-      } else {
-        clearInterval(state.pollingInterval);
-        state.pollingInterval = null;
-        state.isJobRunning = false;
-
-        if (job.error) {
-          alert(`Thông báo tiến trình: ${job.error}`);
-        }
-
-        fetchStats();
-        fetchPosts();
-
-        setTimeout(() => {
-          progressSection.style.display = 'none';
-        }, 3000);
-      }
-    } catch (err) {
-      console.warn('Lỗi khi polling trạng thái job:', err);
-    }
-  }, 1000);
-}
-
-/**
- * Event Listeners
- */
-sinceDateInput.addEventListener('change', () => {
-  const ymd = dmyToYmd(sinceDateInput.value);
-  if (ymd) {
-    state.since = ymd;
-    sinceDatePicker.value = ymd;
-    state.page = 1;
-    updateExportLink();
-    fetchPosts();
-  }
-});
-
-untilDateInput.addEventListener('change', () => {
-  const ymd = dmyToYmd(untilDateInput.value);
-  if (ymd) {
-    state.until = ymd;
-    untilDatePicker.value = ymd;
-    state.page = 1;
-    updateExportLink();
-    fetchPosts();
-  }
-});
-
-filterStatus.addEventListener('change', () => {
-  state.status = filterStatus.value;
-  state.page = 1;
-  updateExportLink();
-  fetchPosts();
-});
-
-let searchTimeout = null;
-filterSearch.addEventListener('input', () => {
-  clearTimeout(searchTimeout);
-  searchTimeout = setTimeout(() => {
-    state.search = filterSearch.value.trim();
-    state.page = 1;
-    updateExportLink();
-    fetchPosts();
-  }, 400);
-});
-
-btnRefreshList.addEventListener('click', () => {
-  fetchStats();
-  fetchPosts();
-});
-
-btnClearPublisherFilter.addEventListener('click', clearPublisherFilter);
-btnRemovePubFilter.addEventListener('click', clearPublisherFilter);
 
 btnPrevPage.addEventListener('click', () => {
   if (state.page > 1) {
@@ -554,7 +647,28 @@ btnNextPage.addEventListener('click', () => {
   }
 });
 
-// Action: Đồng bộ bài viết từ Graph API
+filterSearch.addEventListener('input', debounce(() => {
+  state.search = filterSearch.value.trim();
+  state.page = 1;
+  updateExportLinks();
+  fetchPosts();
+}, 400));
+
+filterStatus.addEventListener('change', (e) => {
+  state.status = e.target.value;
+  state.page = 1;
+  updateExportLinks();
+  fetchPosts();
+});
+
+btnRefreshList.addEventListener('click', () => {
+  fetchPosts();
+  fetchStats();
+});
+
+/**
+ * Action: Đồng bộ bài viết từ Graph API
+ */
 btnSyncPosts.addEventListener('click', async () => {
   const sinceVal = sinceDateInput.value.trim();
   const untilVal = untilDateInput.value.trim();
@@ -576,11 +690,24 @@ btnSyncPosts.addEventListener('click', async () => {
 
     const data = await res.json();
     if (!res.ok || data.error) {
-      alert(`Lỗi: ${data.error || 'Không thể đồng bộ bài viết'}`);
+      const errMsg = data.error || '';
+      const isTokenExpired = errMsg.includes('190') || errMsg.toLowerCase().includes('expired') || errMsg.includes('Token Facebook') || errMsg.includes('OAuthException');
+      if (isTokenExpired) {
+        alert(
+          `⚠️ TOKEN FACEBOOK ĐÃ HẾT HẠN HOẶC KHÔNG ĐÚNG QUYỀN!\n\n` +
+          `Lý do: Token cần là Page Access Token hoặc User Token của tài khoản quản trị.\n\n` +
+          `Cửa sổ "Cài đặt Fanpage & Token" sẽ mở ra để bạn nhập/cập nhật token mới.`
+        );
+        openSettingsModal();
+      } else {
+        alert(`Lỗi: ${errMsg || 'Không thể đồng bộ bài viết'}`);
+      }
     } else {
       alert(`✅ ${data.message}`);
       fetchStats();
-      fetchPosts();
+      fetchBatches();
+      // Chuyển về tab batches để người dùng thấy ngay đợt vừa đồng bộ
+      switchTab('batches');
     }
   } catch (err) {
     alert(`Lỗi mạng: ${err.message}`);
@@ -593,7 +720,9 @@ btnSyncPosts.addEventListener('click', async () => {
   }
 });
 
-// Action: Lấy người đăng
+/**
+ * Action: Lấy người đăng bài qua Playwright
+ */
 btnDetectPublishers.addEventListener('click', async () => {
   const force = forceRecheckCheckbox.checked;
 
@@ -615,7 +744,9 @@ btnDetectPublishers.addEventListener('click', async () => {
   }
 });
 
-// Action: Đồng bộ tất cả
+/**
+ * Action: Đồng bộ tất cả (API + Playwright)
+ */
 btnSyncAll.addEventListener('click', async () => {
   const sinceVal = sinceDateInput.value.trim();
   const untilVal = untilDateInput.value.trim();
@@ -628,7 +759,7 @@ btnSyncAll.addEventListener('click', async () => {
   const force = forceRecheckCheckbox.checked;
 
   btnSyncAll.disabled = true;
-  btnSyncAll.innerHTML = '<span class="spinner-sm"></span> Đang khởi chạy...';
+  btnSyncAll.innerHTML = '<span class="spinner-sm"></span> Đang chạy...';
 
   try {
     const res = await fetch('/api/sync-all', {
@@ -639,11 +770,11 @@ btnSyncAll.addEventListener('click', async () => {
 
     const data = await res.json();
     if (!res.ok || data.error) {
-      alert(`Lỗi: ${data.error || 'Không thể đồng bộ tất cả'}`);
+      alert(`Lỗi: ${data.error || 'Không thể khởi chạy quy trình'}`);
     } else {
-      alert(`✅ ${data.message}`);
+      alert('✅ ' + data.message);
       fetchStats();
-      fetchPosts();
+      fetchBatches();
       startJobPolling();
     }
   } catch (err) {
@@ -657,7 +788,53 @@ btnSyncAll.addEventListener('click', async () => {
   }
 });
 
-// Action: Dừng Job
+/**
+ * Quản lý polling tiến trình quét Chromium
+ */
+function startJobPolling() {
+  if (state.pollingInterval) return;
+  state.isJobRunning = true;
+  progressSection.style.display = 'block';
+
+  state.pollingInterval = setInterval(async () => {
+    try {
+      const res = await fetch('/api/status');
+      const status = await res.json();
+
+      if (status.isRunning) {
+        const total = status.total || 0;
+        const current = status.current || 0;
+        const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+
+        progressBarFill.style.width = `${pct}%`;
+        progressCountText.textContent = `${current} / ${total} (${pct}%)`;
+        progressCurrentMsg.textContent = status.currentPostUrl ? truncateText(status.currentPostUrl, 60) : '-';
+        progressCurrentPub.textContent = status.lastPublisher || '-';
+
+        progFound.textContent = status.found || 0;
+        progNotFound.textContent = status.notFound || 0;
+        progErrors.textContent = status.errors || 0;
+      } else {
+        stopJobPolling();
+        progressSection.style.display = 'none';
+        fetchStats();
+        fetchBatches();
+        fetchPosts();
+      }
+    } catch (e) {
+      console.warn('Lỗi polling status:', e);
+    }
+  }, 1500);
+}
+
+function stopJobPolling() {
+  if (state.pollingInterval) {
+    clearInterval(state.pollingInterval);
+    state.pollingInterval = null;
+  }
+  state.isJobRunning = false;
+}
+
 btnStopJob.addEventListener('click', async () => {
   try {
     await fetch('/api/stop-job', { method: 'POST' });
@@ -665,19 +842,90 @@ btnStopJob.addEventListener('click', async () => {
   } catch (e) {}
 });
 
-// Modal Test nhanh 1 bài
+/**
+ * Quản lý Modal Cài đặt Fanpage & Token (Lưu vào .env)
+ */
+function openSettingsModal() {
+  settingsModal.style.display = 'flex';
+  settingResultBox.style.display = 'none';
+  settingResultBox.innerHTML = '';
+  if (state.configuredPageId && !settingPageId.value) {
+    settingPageId.value = state.configuredPageId;
+  }
+  settingAccessToken.focus();
+}
+
+function closeSettingsModal() {
+  settingsModal.style.display = 'none';
+}
+
+btnOpenSettingsModal.addEventListener('click', openSettingsModal);
+btnCloseSettingsModal.addEventListener('click', closeSettingsModal);
+btnCancelSettingsModal.addEventListener('click', closeSettingsModal);
+
+btnSaveSettings.addEventListener('click', async () => {
+  const pageId = settingPageId.value.trim();
+  const token = settingAccessToken.value.trim();
+
+  if (!pageId) {
+    alert('Vui lòng nhập ID Fanpage.');
+    settingPageId.focus();
+    return;
+  }
+
+  if (!token) {
+    alert('Vui lòng dán Facebook Access Token.');
+    settingAccessToken.focus();
+    return;
+  }
+
+  btnSaveSettings.disabled = true;
+  saveSettingsSpinner.style.display = 'inline-block';
+  settingResultBox.style.display = 'block';
+  settingResultBox.innerHTML = '<em>Đang kiểm tra và liên kết với Facebook...</em>';
+
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pageId, accessToken: token })
+    });
+
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      settingResultBox.innerHTML = `<div style="color: var(--danger); font-weight: 600;">❌ ${escapeHtml(data.error || 'Lỗi lưu cấu hình')}</div>`;
+    } else {
+      settingResultBox.innerHTML = `
+        <div style="color: var(--success); font-weight: 600; font-size: 0.95rem;">✅ ${escapeHtml(data.message)}</div>
+        <div style="margin-top: 0.4rem; color: var(--text-muted); font-size: 0.85rem;">
+          Đã lưu vào file <code>.env</code>. Hệ thống sẽ duy trì cấu hình này ngay cả khi khởi động lại server.
+        </div>
+      `;
+      checkConfigStatus();
+    }
+  } catch (err) {
+    settingResultBox.innerHTML = `<div style="color: var(--danger);">❌ Lỗi kết nối: ${escapeHtml(err.message)}</div>`;
+  } finally {
+    btnSaveSettings.disabled = false;
+    saveSettingsSpinner.style.display = 'none';
+  }
+});
+
+/**
+ * Quản lý Modal Test 1 bài viết
+ */
 btnOpenTestModal.addEventListener('click', () => {
   testPostModal.style.display = 'flex';
   testResultBox.style.display = 'none';
   testResultBox.innerHTML = '';
 });
 
-function closeModal() {
+function closeTestModal() {
   testPostModal.style.display = 'none';
 }
 
-btnCloseModal.addEventListener('click', closeModal);
-btnCancelModal.addEventListener('click', closeModal);
+btnCloseModal.addEventListener('click', closeTestModal);
+btnCancelModal.addEventListener('click', closeTestModal);
 
 btnRunTestPost.addEventListener('click', async () => {
   const url = testPostUrl.value.trim();
@@ -724,6 +972,39 @@ btnRunTestPost.addEventListener('click', async () => {
   }
 });
 
+// Utilities
+function formatVnDateDisplay(isoString) {
+  if (!isoString) return '';
+  try {
+    const d = new Date(isoString);
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    const hours = String(d.getHours()).padStart(2, '0');
+    const mins = String(d.getMinutes()).padStart(2, '0');
+    return `${day}/${month}/${year} ${hours}:${mins}`;
+  } catch (e) {
+    return isoString;
+  }
+}
+
+function truncateText(str, maxLen) {
+  if (!str) return '';
+  return str.length > maxLen ? str.substring(0, maxLen) + '...' : str;
+}
+
+function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+}
+
 function escapeHtml(str) {
   if (!str) return '';
   return String(str)
@@ -734,12 +1015,12 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
-// Khởi chạy ban đầu
+// Khởi chạy ban đầu khi trang load
 window.addEventListener('DOMContentLoaded', () => {
   initDefaultDates();
   checkConfigStatus();
   fetchStats();
-  fetchPosts();
+  fetchBatches(); // Tải danh sách các đợt đồng bộ bài viết (Mặc định không hiển thị bài viết dàn trải)
 
   fetch('/api/status').then(r => r.json()).then(j => {
     if (j.isRunning) startJobPolling();

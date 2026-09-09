@@ -1,11 +1,13 @@
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const config = require('./config');
 const db = require('./db');
 const { syncPosts, detectPublishers, syncAll, getJobState, stopJob } = require('./sync-service');
 const { isValidDateFormat, isDateRangeValid, formatVNDate, escapeCsvField, truncate, normalizeDateStr } = require('./utils');
 const { getBrowserContext, closeBrowserContext, checkPageLogin } = require('./facebook-browser');
 const { detectPublisher } = require('./publisher-detector');
+const { resolvePageAccessToken } = require('./token-resolver');
 
 const app = express();
 
@@ -79,14 +81,27 @@ app.get('/api/publishers', (req, res) => {
 });
 
 /**
- * 7. Danh sách bài viết có phân trang và bộ lọc
+ * 6.1 Danh sách các đợt đồng bộ bài viết
+ */
+app.get('/api/batches', (req, res) => {
+  try {
+    const batches = db.getSyncBatches();
+    res.json(batches);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * 7. Danh sách bài viết có phân trang và bộ lọc (hỗ trợ batchId)
  */
 app.get('/api/posts', (req, res) => {
   try {
-    const { since, until, publisher, status, search, page = 1, limit = 20 } = req.query;
+    const { since, until, batchId, publisher, status, search, page = 1, limit = 20 } = req.query;
     const result = db.getPosts({
       since,
       until,
+      batchId,
       publisher,
       status,
       search,
@@ -104,11 +119,11 @@ app.get('/api/posts', (req, res) => {
  */
 app.get('/api/export.csv', (req, res) => {
   try {
-    let { since, until, publisher, status, search } = req.query;
+    let { since, until, batchId, publisher, status, search } = req.query;
     if (since) since = normalizeDateStr(since) || since;
     if (until) until = normalizeDateStr(until) || until;
 
-    const posts = db.getAllPostsForExport({ since, until, publisher, status, search });
+    const posts = db.getAllPostsForExport({ since, until, batchId, publisher, status, search });
 
     // UTF-8 BOM để Excel hiển thị đúng tiếng Việt
     let csv = '\uFEFF';
@@ -147,11 +162,11 @@ app.get('/api/export.csv', (req, res) => {
 app.get('/api/export.xlsx', (req, res) => {
   try {
     const XLSX = require('xlsx');
-    let { since, until, publisher, status, search } = req.query;
+    let { since, until, batchId, publisher, status, search } = req.query;
     if (since) since = normalizeDateStr(since) || since;
     if (until) until = normalizeDateStr(until) || until;
 
-    const posts = db.getAllPostsForExport({ since, until, publisher, status, search });
+    const posts = db.getAllPostsForExport({ since, until, batchId, publisher, status, search });
 
     // Tạo mảng dữ liệu cho Excel
     const excelRows = posts.map((p, idx) => {
@@ -244,6 +259,120 @@ app.post('/api/sync-posts', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * 9.1 Cập nhật nhanh cấu hình Fanpage & Token từ Web UI vào file .env
+ */
+app.post('/api/settings', async (req, res) => {
+  try {
+    const { pageId, accessToken } = req.body;
+    if (!pageId || !pageId.trim()) {
+      return res.status(400).json({ error: 'Vui lòng nhập ID Fanpage (FB_PAGE_ID).' });
+    }
+    if (!accessToken || !accessToken.trim()) {
+      return res.status(400).json({ error: 'Vui lòng nhập Facebook Access Token.' });
+    }
+
+    const cleanPageId = pageId.trim();
+    const cleanToken = accessToken.trim();
+
+    // Phân giải và kiểm tra token với Facebook (tự động chuyển User Token -> Page Token)
+    const resolved = await resolvePageAccessToken(cleanToken, cleanPageId, config.FB_GRAPH_VERSION);
+    if (!resolved.ok) {
+      return res.status(400).json({ error: resolved.error });
+    }
+
+    const finalToken = resolved.token;
+    const finalPageId = resolved.pageId || cleanPageId;
+
+    // Lưu vĩnh viễn vào file .env
+    const envPath = path.resolve(config.ROOT_DIR, '.env');
+    let envContent = '';
+    if (fs.existsSync(envPath)) {
+      envContent = fs.readFileSync(envPath, 'utf8');
+    }
+
+    if (envContent.includes('FB_PAGE_ID=')) {
+      envContent = envContent.replace(/FB_PAGE_ID=.*/g, `FB_PAGE_ID=${finalPageId}`);
+    } else {
+      envContent = `FB_PAGE_ID=${finalPageId}\n` + envContent;
+    }
+
+    if (envContent.includes('FB_PAGE_ACCESS_TOKEN=')) {
+      envContent = envContent.replace(/FB_PAGE_ACCESS_TOKEN=.*/g, `FB_PAGE_ACCESS_TOKEN=${finalToken}`);
+    } else {
+      envContent += `\nFB_PAGE_ACCESS_TOKEN=${finalToken}\n`;
+    }
+
+    fs.writeFileSync(envPath, envContent, 'utf8');
+    config.reloadEnv();
+
+    res.json({
+      success: true,
+      message: `Đã lưu cấu hình Fanpage thành công! Trang: "${resolved.pageName || finalPageId}"`,
+      pageId: finalPageId,
+      pageName: resolved.pageName || finalPageId,
+      converted: resolved.converted
+    });
+  } catch (err) {
+    res.status(500).json({ error: `Lỗi khi lưu cấu hình: ${err.message}` });
+  }
+});
+
+/**
+ * 9.2 Cập nhật nhanh Page Access Token vào .env mà không cần mở file
+ */
+app.post('/api/update-token', async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token || typeof token !== 'string' || !token.trim()) {
+      return res.status(400).json({ error: 'Token không được để trống.' });
+    }
+
+    const cleanToken = token.trim();
+    const cleanPageId = config.FB_PAGE_ID;
+
+    // Tự động phân giải token nếu người dùng dán User Token
+    let finalToken = cleanToken;
+    let pageName = null;
+    let converted = false;
+
+    if (cleanPageId) {
+      const resolved = await resolvePageAccessToken(cleanToken, cleanPageId, config.FB_GRAPH_VERSION);
+      if (resolved.ok && resolved.token) {
+        finalToken = resolved.token;
+        pageName = resolved.pageName;
+        converted = resolved.converted;
+      }
+    }
+
+    const envPath = path.resolve(config.ROOT_DIR, '.env');
+    let envContent = '';
+    if (fs.existsSync(envPath)) {
+      envContent = fs.readFileSync(envPath, 'utf8');
+    }
+
+    if (envContent.includes('FB_PAGE_ACCESS_TOKEN=')) {
+      envContent = envContent.replace(/FB_PAGE_ACCESS_TOKEN=.*/g, `FB_PAGE_ACCESS_TOKEN=${finalToken}`);
+    } else {
+      envContent += `\nFB_PAGE_ACCESS_TOKEN=${finalToken}\n`;
+    }
+
+    fs.writeFileSync(envPath, envContent, 'utf8');
+    config.reloadEnv();
+
+    res.json({
+      success: true,
+      message: converted 
+        ? `Đã tự động chuyển đổi User Token sang Page Token cho "${pageName}" và lưu vào .env!`
+        : 'Đã cập nhật Page Access Token thành công vào file .env!',
+      pageName,
+      converted
+    });
+  } catch (err) {
+    res.status(500).json({ error: `Lỗi khi lưu token: ${err.message}` });
   }
 });
 
