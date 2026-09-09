@@ -68,9 +68,11 @@ function cleanPublisherName(name) {
 
   const blacklist = [
     'facebook', 'meta', 'quản trị viên', 'admin', 'chia sẻ',
-    'bình luận', 'thích', 'comment', 'share', 'like', 'theo dõi', 'follow'
+    'bình luận', 'thích', 'comment', 'share', 'like', 'theo dõi', 'follow',
+    'chỉ báo trạng thái', 'trạng thái online', 'đang hoạt động', 'bài viết của',
+    'người kiểm duyệt', 'xem thêm'
   ];
-  if (blacklist.includes(clean.toLowerCase())) {
+  if (blacklist.some(b => clean.toLowerCase().includes(b))) {
     return null;
   }
 
@@ -144,8 +146,12 @@ async function detectPublisher(page, options = {}) {
         if (!text) return true;
         const lower = text.trim().toLowerCase();
         if (fanpageNameToExclude && lower === fanpageNameToExclude.trim().toLowerCase()) return true;
-        const black = ['facebook', 'bình luận', 'chia sẻ', 'thích', 'like', 'share', 'comment', 'theo dõi', 'follow', 'quản trị viên'];
-        return black.includes(lower);
+        const black = [
+          'facebook', 'meta', 'bình luận', 'chia sẻ', 'thích', 'like', 'share',
+          'comment', 'theo dõi', 'follow', 'quản trị viên', 'chỉ báo trạng thái',
+          'trạng thái online', 'đang hoạt động', 'bài viết của', 'người kiểm duyệt'
+        ];
+        return black.some(b => lower.includes(b));
       }
 
       // 2.1 Kiểm tra trạng thái bài viết không khả dụng
