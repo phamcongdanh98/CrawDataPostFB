@@ -52,56 +52,57 @@ function getCandidateUrls(post) {
   const pageId = post.page_id || parts[0];
   const storyFbid = parts[1];
 
+  // 1. Ưu tiên tuyệt đối: permalink.php?story_fbid=...&id=...
+  // Đây là URL quản trị Fanpage chuẩn của Facebook luôn hiển thị nhãn "Người đăng / Published by" ngay ở lần tải đầu tiên
   if (pageId && storyFbid) {
     urls.push(`https://www.facebook.com/permalink.php?story_fbid=${storyFbid}&id=${pageId}`);
   }
+
+  // 2. URL dự phòng permalink_url từ Graph API nếu không có storyFbid hoặc cần fallback
   if (post.permalink_url && !urls.includes(post.permalink_url)) {
     urls.push(post.permalink_url);
   }
+
   return urls;
 }
 
 /**
  * Xử lý một bài viết đơn lẻ
  */
-async function processSinglePost(context, post) {
+async function processSinglePost(pageOrContext, post) {
   let page = null;
+  let shouldClose = false;
   let result = null;
 
   try {
-    page = await context.newPage();
+    if (typeof pageOrContext.newPage === 'function') {
+      page = await pageOrContext.newPage();
+      shouldClose = true;
+    } else {
+      page = pageOrContext;
+    }
 
-    // Giới hạn timeout 30s
-    page.setDefaultTimeout(30000);
-    page.setDefaultNavigationTimeout(30000);
+    page.setDefaultTimeout(15000);
+    page.setDefaultNavigationTimeout(15000);
 
     const urls = getCandidateUrls(post);
 
     for (let i = 0; i < urls.length; i++) {
       const targetUrl = urls[i];
-      await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
-      // 1. Kiểm tra session đăng nhập
-      const loginCheck = await checkPageLogin(page);
-      if (!loginCheck.isLoggedIn) {
-        return {
-          status: 'LOGIN_REQUIRED',
-          reason: loginCheck.reason || 'Phiên Facebook đã hết hạn. Hãy chạy: npm run login'
-        };
-      }
-
-      // 2. Chạy detector
+      // Chạy detector trích xuất publisher
       result = await detectPublisher(page, {
         postId: post.id
       });
 
-      if (result.status === 'FOUND') {
+      if (result.status === 'FOUND' || result.status === 'LOGIN_REQUIRED') {
         break;
       }
 
-      // Nếu còn URL dự phòng thì thử tiếp
+      // Nếu còn URL dự phòng thì thử tiếp nhanh
       if (i < urls.length - 1) {
-        await sleep(1000);
+        await sleep(200);
       }
     }
 
@@ -111,9 +112,8 @@ async function processSinglePost(context, post) {
       status: 'ERROR',
       reason: err.message
     };
-    return result;
   } finally {
-    if (page) {
+    if (shouldClose && page) {
       try {
         await page.close();
       } catch (e) {}
@@ -180,62 +180,75 @@ async function runPublisherWorker(options = {}) {
     const activeWorkers = [];
 
     async function workerTask(workerId) {
-      while (currentIndex < postsToProcess.length && !jobState.stopRequested) {
-        const index = currentIndex++;
-        const post = postsToProcess[index];
-        const postPreview = truncate(post.message || `Post ID: ${post.id}`, 60);
+      let workerPage = null;
+      try {
+        workerPage = await context.newPage();
+        workerPage.setDefaultTimeout(15000);
+        workerPage.setDefaultNavigationTimeout(15000);
 
-        jobState.currentPostMessage = postPreview;
+        while (currentIndex < postsToProcess.length && !jobState.stopRequested) {
+          const index = currentIndex++;
+          const post = postsToProcess[index];
+          const postPreview = truncate(post.message || `Post ID: ${post.id}`, 60);
 
-        let attempt = 0;
-        let postResult = null;
+          jobState.currentPostMessage = postPreview;
 
-        while (attempt < config.FB_MAX_RETRIES && !postResult) {
-          attempt++;
-          postResult = await processSinglePost(context, post);
+          let attempt = 0;
+          let postResult = null;
 
-          // Nếu lỗi tạm thời và chưa vượt max retries thì thử lại
-          if (postResult.status === 'ERROR' && attempt < config.FB_MAX_RETRIES) {
-            console.warn(`[Publisher] Bài ${post.id} gặp lỗi lần ${attempt}. Thử lại...`);
-            await sleep(2000);
-            postResult = null;
+          while (attempt < config.FB_MAX_RETRIES && !postResult) {
+            attempt++;
+            postResult = await processSinglePost(workerPage, post);
+
+            // Nếu lỗi tạm thời và chưa vượt max retries thì thử lại
+            if (postResult.status === 'ERROR' && attempt < config.FB_MAX_RETRIES) {
+              console.warn(`[Publisher] Bài ${post.id} gặp lỗi lần ${attempt}. Thử lại...`);
+              await sleep(500);
+              postResult = null;
+            }
+          }
+
+          // Cập nhật Database ngay lập tức
+          db.updatePublisherResult(post.id, postResult);
+
+          // Cập nhật thống kê in-memory
+          jobState.processed++;
+          jobState.lastStatus = postResult.status;
+
+          if (postResult.status === 'FOUND') {
+            jobState.found++;
+            jobState.currentPublisher = postResult.name;
+            console.log(`[Publisher] [Worker ${workerId}] ${jobState.processed}/${jobState.total} - FOUND: ${postResult.name} | ${postPreview}`);
+          } else if (postResult.status === 'NOT_FOUND') {
+            jobState.notFound++;
+            console.log(`[Publisher] [Worker ${workerId}] ${jobState.processed}/${jobState.total} - NOT_FOUND | ${postPreview}`);
+          } else if (postResult.status === 'LOGIN_REQUIRED') {
+            jobState.errors++;
+            jobState.error = 'Phiên Facebook đã hết hạn. Hãy chạy: npm run login';
+            jobState.stopRequested = true;
+            console.error('[Publisher] PHÁT HIỆN HẾT PHIÊN ĐĂNG NHẬP. Dừng toàn bộ tiến trình.');
+            console.error('[Publisher] Hãy chạy: npm run login');
+            break;
+          } else {
+            jobState.errors++;
+            console.log(`[Publisher] [Worker ${workerId}] ${jobState.processed}/${jobState.total} - ${postResult.status}: ${postResult.reason || ''} | ${postPreview}`);
+          }
+
+          if (typeof options.onProgress === 'function') {
+            options.onProgress({ ...jobState });
+          }
+
+          // Random delay giữa các bài để đảm bảo an toàn, ổn định
+          if (!jobState.stopRequested && currentIndex < postsToProcess.length) {
+            const delay = getRandomDelay(config.FB_DELAY_MIN_MS, config.FB_DELAY_MAX_MS);
+            await sleep(delay);
           }
         }
-
-        // Cập nhật Database ngay lập tức
-        db.updatePublisherResult(post.id, postResult);
-
-        // Cập nhật thống kê in-memory
-        jobState.processed++;
-        jobState.lastStatus = postResult.status;
-
-        if (postResult.status === 'FOUND') {
-          jobState.found++;
-          jobState.currentPublisher = postResult.name;
-          console.log(`[Publisher] [Worker ${workerId}] ${jobState.processed}/${jobState.total} - FOUND: ${postResult.name} | ${postPreview}`);
-        } else if (postResult.status === 'NOT_FOUND') {
-          jobState.notFound++;
-          console.log(`[Publisher] [Worker ${workerId}] ${jobState.processed}/${jobState.total} - NOT_FOUND | ${postPreview}`);
-        } else if (postResult.status === 'LOGIN_REQUIRED') {
-          jobState.errors++;
-          jobState.error = 'Phiên Facebook đã hết hạn. Hãy chạy: npm run login';
-          jobState.stopRequested = true;
-          console.error('[Publisher] PHÁT HIỆN HẾT PHIÊN ĐĂNG NHẬP. Dừng toàn bộ tiến trình.');
-          console.error('[Publisher] Hãy chạy: npm run login');
-          break;
-        } else {
-          jobState.errors++;
-          console.log(`[Publisher] [Worker ${workerId}] ${jobState.processed}/${jobState.total} - ${postResult.status}: ${postResult.reason || ''} | ${postPreview}`);
-        }
-
-        if (typeof options.onProgress === 'function') {
-          options.onProgress({ ...jobState });
-        }
-
-        // Random delay giữa các bài để đảm bảo an toàn, ổn định
-        if (!jobState.stopRequested && currentIndex < postsToProcess.length) {
-          const delay = getRandomDelay(config.FB_DELAY_MIN_MS, config.FB_DELAY_MAX_MS);
-          await sleep(delay);
+      } finally {
+        if (workerPage) {
+          try {
+            await workerPage.close();
+          } catch (e) {}
         }
       }
     }

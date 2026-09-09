@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('./config');
+const { sleep } = require('./utils');
 
 /**
  * Trích xuất Publisher ID và chuẩn hóa Profile URL
@@ -83,6 +84,12 @@ function cleanPublisherName(name) {
  * Lưu snapshot debug khi không tìm thấy thông tin hoặc gặp lỗi
  */
 async function saveDebugSnapshot(page, postId, metadata = {}) {
+  // Chỉ chụp ảnh màn hình và dump HTML khi bật DEBUG_SNAPSHOT hoặc DEBUG để tối ưu tốc độ crawl
+  const shouldSave = process.env.DEBUG_SNAPSHOT === 'true' || config.DEBUG;
+  if (!shouldSave) {
+    return null;
+  }
+
   try {
     const timestamp = Date.now();
     const safeId = (postId || `unknown_${timestamp}`).replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -136,11 +143,13 @@ async function detectPublisher(page, options = {}) {
   const pageName = options.pageName || null;
 
   try {
-    // 1. Chờ trang tải và ổn định DOM
-    await page.waitForLoadState('domcontentloaded').catch(() => {});
-    await page.waitForTimeout(1500);
+    // Đợi giao diện Facebook hiển thị nút Thích/Reaction của bài viết (báo hiệu bài viết và thanh tương tác đã render)
+    try {
+      await page.waitForSelector('[aria-label="Thích"], [aria-label="Like"], [aria-label="Gỡ Thích"], [aria-label="Remove Like"]', { timeout: 6000 });
+      await sleep(400);
+    } catch (e) {}
 
-    // 2. Chạy hàm phát hiện trực tiếp trong context của trang
+    // Chạy hàm phát hiện trực tiếp trong context của trang ngay khi DOM tải xong
     const evaluation = await page.evaluate((fanpageNameToExclude) => {
       function isExcludedName(text) {
         if (!text) return true;
@@ -154,8 +163,10 @@ async function detectPublisher(page, options = {}) {
         return black.some(b => lower.includes(b));
       }
 
-      // 2.1 Kiểm tra trạng thái bài viết không khả dụng
+      // Đọc visible text một lần duy nhất để tối ưu hiệu năng layout
       const bodyText = document.body ? document.body.innerText : '';
+
+      // 2.1 Kiểm tra trạng thái bài viết không khả dụng
       const unavailablePatterns = [
         'Nội dung này hiện không khả dụng',
         "This content isn't available right now",
@@ -181,19 +192,20 @@ async function detectPublisher(page, options = {}) {
         };
       }
 
-      // 2.3 Trích xuất chỉ số tương tác (Likes/Reactions, Comments, Shares) & Phân loại bài viết
+      // 2.3 Trích xuất chỉ số tương tác (Likes/Reactions, Comments, Shares)
       function extractMetricsAndType() {
-        let likes = null;
-        let comments = null;
-        let shares = null;
+        let likes = 0;
+        let comments = 0;
+        let shares = 0;
+        let postType = null;
 
         function parseCount(text) {
-          if (!text || typeof text !== 'string') return null;
+          if (!text || typeof text !== 'string') return 0;
           const clean = text.trim().replace(/[\u034f\u200b-\u200f\u202a-\u202e\ufeff]/g, '');
           const m = clean.match(/([\d,.]+)\s*([kKmM]?)/);
-          if (!m) return null;
+          if (!m) return 0;
           let val = m[1];
-          const unit = m[2].toLowerCase();
+          const unit = (m[2] || '').toLowerCase();
           if (unit === 'k') {
             val = val.replace(',', '.');
             return Math.round(parseFloat(val) * 1000);
@@ -206,79 +218,56 @@ async function detectPublisher(page, options = {}) {
             val = val.replace(/[,.]/g, '');
           }
           const parsed = parseInt(val, 10);
-          return isNaN(parsed) ? null : parsed;
+          return isNaN(parsed) ? 0 : parsed;
         }
 
-        // Phân loại bài viết (ORIGINAL hay SHARED)
-        const fullBodyText = document.body ? document.body.innerText : '';
-        const lowerBody = fullBodyText.toLowerCase();
-        const shareIndicators = [
-          'đã chia sẻ một bài viết',
-          'đã chia sẻ bài viết',
-          'đã chia sẻ liên kết',
-          'đã chia sẻ một kỷ niệm',
-          'shared a post',
-          'shared a link'
-        ];
-        const isShared = shareIndicators.some(ind => lowerBody.includes(ind));
-        const postType = isShared ? 'SHARED' : 'ORIGINAL';
+        // Bóc tách cô lập trong phạm vi nội dung chính (mainArea)
+        // Loại trừ tuyệt đối header bar, navigation bar, popup thông báo, và danh sách comment
+        const mainArea = document.querySelector('div[role="main"]') || document.body;
+        const candidateButtons = Array.from(mainArea.querySelectorAll('[role="button"]')).filter(b => {
+          if (b.closest('header, div[role="banner"], div[role="navigation"], [aria-label*="Thông báo"], [aria-label*="Notifications"]')) return false;
+          if (b.closest('[aria-label*="Bình luận dưới tên"], [aria-label*="Bình luận của"]')) return false;
+          return true;
+        });
 
-        // Quét các nút tương tác và aria-labels
-        const buttons = Array.from(document.querySelectorAll('[role="button"], [aria-label]'));
-        for (const btn of buttons) {
-          const ariaLabel = (btn.getAttribute('aria-label') || '').trim();
-          const lowerLabel = ariaLabel.toLowerCase();
-          const btnText = (btn.innerText || '').trim();
+        // 1. Tìm nút reaction/Thích của bài viết chính
+        const reactBtn = candidateButtons.find(b => {
+          const aria = (b.getAttribute('aria-label') || '').trim();
+          return /^(?:Thích|Gỡ Thích|Yêu thích|Gỡ Yêu thích|Thương thương|Haha|Wow|Buồn|Phẫn nộ|Like|Remove Like)$/i.test(aria);
+        });
 
-          // 1. Likes / Reactions
-          if (likes === null) {
-            if (/^(?:Thích|Gỡ Thích|Bày tỏ cảm xúc|Like|Remove Like)$/i.test(ariaLabel) && btnText) {
-              const parsed = parseCount(btnText);
-              if (parsed !== null && parsed > 0) likes = parsed;
-            } else if (lowerLabel.includes('thích:') || lowerLabel.includes('người khác')) {
-              const parsed = parseCount(ariaLabel);
-              if (parsed !== null && parsed > 0) likes = parsed;
-            }
+        if (reactBtn) {
+          // Tìm thanh action bar (container chứa cụm 3 nút Thích, Bình luận, Chia sẻ)
+          let actionBar = reactBtn.parentElement;
+          for (let i = 0; i < 5; i++) {
+            if (actionBar && actionBar.children.length >= 3) break;
+            if (actionBar && actionBar.parentElement) actionBar = actionBar.parentElement;
           }
 
-          // 2. Comments / Bình luận
-          if (comments === null) {
-            if ((lowerLabel.includes('bình luận') || lowerLabel.includes('viết bình luận') || lowerLabel.includes('comment')) && btnText) {
-              const parsed = parseCount(btnText);
-              if (parsed !== null && parsed >= 0) comments = parsed;
-            } else if (lowerLabel.includes('bình luận') && /\d+/.test(ariaLabel)) {
-              const parsed = parseCount(ariaLabel);
-              if (parsed !== null && parsed >= 0) comments = parsed;
-            }
-          }
+          if (actionBar) {
+            Array.from(actionBar.children).forEach(child => {
+              const btn = child.getAttribute('role') === 'button' ? child : child.querySelector('[role="button"]');
+              const target = btn || child;
+              const aria = (target.getAttribute('aria-label') || '').trim().toLowerCase();
+              const txt = (target.innerText || '').trim();
 
-          // 3. Shares / Chia sẻ
-          if (shares === null) {
-            if ((lowerLabel.includes('gửi nội dung này cho bạn bè') || lowerLabel.includes('chia sẻ') || lowerLabel.includes('share')) && btnText) {
-              const parsed = parseCount(btnText);
-              if (parsed !== null && parsed >= 0) shares = parsed;
-            } else if ((lowerLabel.includes('lượt chia sẻ') || lowerLabel.includes('chia sẻ')) && /\d+/.test(ariaLabel)) {
-              const parsed = parseCount(ariaLabel);
-              if (parsed !== null && parsed >= 0) shares = parsed;
-            }
-          }
-        }
+              if (/^(?:thích|gỡ thích|yêu thích|gỡ yêu thích|thương thương|haha|wow|buồn|phẫn nộ|like|remove like)$/i.test(aria)) {
+                likes = parseCount(txt);
+              } else if (aria.includes('bình luận') || aria.includes('viết bình luận') || aria.includes('comment')) {
+                comments = parseCount(txt);
+              } else if (aria.includes('chia sẻ') || aria.includes('gửi nội dung này') || aria.includes('share')) {
+                shares = parseCount(txt);
+              }
+            });
 
-        // Quét các thẻ văn bản độc lập (nếu nút bấm không có text trực tiếp)
-        if (likes === null || comments === null || shares === null) {
-          const allSpans = Array.from(document.querySelectorAll('span, div')).filter(el => el.children.length === 0);
-          for (const s of allSpans) {
-            const t = (s.innerText || '').trim();
-            if (!t) continue;
-            const lower = t.toLowerCase();
-
-            if (comments === null && (lower.includes('bình luận') || lower.includes('comment'))) {
-              const parsed = parseCount(t);
-              if (parsed !== null) comments = parsed;
-            }
-            if (shares === null && (lower.includes('chia sẻ') || lower.includes('share'))) {
-              const parsed = parseCount(t);
-              if (parsed !== null) shares = parsed;
+            // Nếu nút Thích không hiển thị số trực tiếp (Facebook hiển thị số lượng ở dòng tổng hợp cảm xúc phía trên)
+            if (likes === 0 && actionBar.parentElement) {
+              const aboveArea = actionBar.parentElement;
+              const summaryReact = aboveArea.querySelector('[role="button"][aria-label*="cảm xúc"], [role="button"][aria-label*="người khác"], [role="button"][aria-label*="thích:"]');
+              if (summaryReact) {
+                const parsed = parseCount(summaryReact.getAttribute('aria-label')) || parseCount(summaryReact.innerText);
+                if (parsed > 0) likes = parsed;
+              }
             }
           }
         }
@@ -455,7 +444,7 @@ async function detectPublisher(page, options = {}) {
     const likes = typeof extractedMetrics.likes === 'number' ? extractedMetrics.likes : null;
     const comments = typeof extractedMetrics.comments === 'number' ? extractedMetrics.comments : null;
     const shares = typeof extractedMetrics.shares === 'number' ? extractedMetrics.shares : null;
-    const postType = extractedMetrics.postType || 'ORIGINAL';
+    const postType = extractedMetrics.postType || null;
 
     // 3. Xử lý kết quả từ evaluate
     if (evaluation.status === 'FOUND') {

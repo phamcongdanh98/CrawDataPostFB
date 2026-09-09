@@ -54,16 +54,19 @@ const config = {
     return path.resolve(ROOT_DIR, process.env.FB_PROFILE_DIR || './fb-profile');
   },
   get FB_HEADLESS() {
-    return process.env.FB_HEADLESS === 'true';
+    if (process.env.FB_HEADLESS !== undefined) {
+      return process.env.FB_HEADLESS !== 'false';
+    }
+    return true; // Mặc định chạy ẩn để tối ưu tốc độ và không làm phiền người dùng
   },
   get FB_CONCURRENCY() {
-    return Math.min(4, Math.max(1, parseInt(process.env.FB_CONCURRENCY, 10) || 2));
+    return Math.min(16, Math.max(1, parseInt(process.env.FB_CONCURRENCY, 10) || 10));
   },
   get FB_DELAY_MIN_MS() {
-    return Math.max(500, parseInt(process.env.FB_DELAY_MIN_MS, 10) || 1500);
+    return Math.max(10, parseInt(process.env.FB_DELAY_MIN_MS, 10) || 50);
   },
   get FB_DELAY_MAX_MS() {
-    return Math.max(1000, parseInt(process.env.FB_DELAY_MAX_MS, 10) || 3500);
+    return Math.max(30, parseInt(process.env.FB_DELAY_MAX_MS, 10) || 150);
   },
   get FB_MAX_RETRIES() {
     return Math.max(1, parseInt(process.env.FB_MAX_RETRIES, 10) || 2);

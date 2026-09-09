@@ -36,10 +36,190 @@ app.get('/api/config-status', (req, res) => {
     pageId: config.FB_PAGE_ID || null,
     graphVersion: config.FB_GRAPH_VERSION,
     concurrency: config.FB_CONCURRENCY,
+    delayMinMs: config.FB_DELAY_MIN_MS,
+    delayMaxMs: config.FB_DELAY_MAX_MS,
     port: config.PORT,
     timezone: config.TZ
   });
 });
+
+/**
+ * 2.1 Cập nhật cài đặt (Page ID, Access Token, Số luồng Concurrency, Delay)
+ */
+app.post('/api/settings', async (req, res) => {
+  try {
+    const { pageId, accessToken, concurrency, delayMinMs, delayMaxMs } = req.body;
+    const envPath = path.resolve(config.ROOT_DIR, '.env');
+    let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+
+    if (pageId) {
+      if (/FB_PAGE_ID=.*/.test(envContent)) {
+        envContent = envContent.replace(/FB_PAGE_ID=.*/g, `FB_PAGE_ID=${pageId.trim()}`);
+      } else {
+        envContent += `\nFB_PAGE_ID=${pageId.trim()}`;
+      }
+    }
+
+    if (accessToken) {
+      let finalToken = accessToken.trim();
+      // Thử tự động resolve page access token nếu người dùng dán user token
+      if (pageId) {
+        try {
+          const resolved = await resolvePageAccessToken(finalToken, pageId.trim(), config.FB_GRAPH_VERSION);
+          if (resolved.ok && resolved.token) {
+            finalToken = resolved.token;
+          }
+        } catch (e) {}
+      }
+      if (/FB_PAGE_ACCESS_TOKEN=.*/.test(envContent)) {
+        envContent = envContent.replace(/FB_PAGE_ACCESS_TOKEN=.*/g, `FB_PAGE_ACCESS_TOKEN=${finalToken}`);
+      } else {
+        envContent += `\nFB_PAGE_ACCESS_TOKEN=${finalToken}`;
+      }
+    }
+
+    if (concurrency) {
+      const c = Math.min(16, Math.max(1, parseInt(concurrency, 10) || 10));
+      if (/FB_CONCURRENCY=.*/.test(envContent)) {
+        envContent = envContent.replace(/FB_CONCURRENCY=.*/g, `FB_CONCURRENCY=${c}`);
+      } else {
+        envContent += `\nFB_CONCURRENCY=${c}`;
+      }
+    }
+
+    if (delayMinMs !== undefined) {
+      const dMin = Math.max(10, parseInt(delayMinMs, 10) || 50);
+      if (/FB_DELAY_MIN_MS=.*/.test(envContent)) {
+        envContent = envContent.replace(/FB_DELAY_MIN_MS=.*/g, `FB_DELAY_MIN_MS=${dMin}`);
+      } else {
+        envContent += `\nFB_DELAY_MIN_MS=${dMin}`;
+      }
+    }
+
+    if (delayMaxMs !== undefined) {
+      const dMax = Math.max(30, parseInt(delayMaxMs, 10) || 150);
+      if (/FB_DELAY_MAX_MS=.*/.test(envContent)) {
+        envContent = envContent.replace(/FB_DELAY_MAX_MS=.*/g, `FB_DELAY_MAX_MS=${dMax}`);
+      } else {
+        envContent += `\nFB_DELAY_MAX_MS=${dMax}`;
+      }
+    }
+
+    fs.writeFileSync(envPath, envContent.trim() + '\n', 'utf8');
+    config.reloadEnv();
+
+    res.json({
+      success: true,
+      message: 'Đã lưu cấu hình thành công vào .env',
+      concurrency: config.FB_CONCURRENCY,
+      pageId: config.FB_PAGE_ID
+    });
+  } catch (err) {
+    res.status(500).json({ error: `Lỗi khi lưu cấu hình: ${err.message}` });
+  }
+});
+
+/**
+ * 2.2 Kiểm tra tính hợp lệ và quyền hạn của Access Token
+ */
+app.post('/api/test-token', async (req, res) => {
+  try {
+    let { accessToken, pageId } = req.body;
+    accessToken = (accessToken || config.FB_PAGE_ACCESS_TOKEN || '').trim();
+    pageId = (pageId || config.FB_PAGE_ID || '').trim();
+
+    if (!accessToken) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Chưa có Access Token để kiểm tra. Vui lòng nhập hoặc cấu hình trong .env.'
+      });
+    }
+
+    // 1. Gọi debug_token
+    let debugData = null;
+    try {
+      const debugRes = await fetch(`https://graph.facebook.com/${config.FB_GRAPH_VERSION}/debug_token?input_token=${accessToken}&access_token=${accessToken}`);
+      const json = await debugRes.json();
+      if (json && json.data) {
+        debugData = json.data;
+      }
+    } catch (e) {}
+
+    // 2. Gọi me để lấy tên và ID
+    let meData = null;
+    let meError = null;
+    try {
+      const meRes = await fetch(`https://graph.facebook.com/${config.FB_GRAPH_VERSION}/me?fields=id,name&access_token=${accessToken}`);
+      const json = await meRes.json();
+      if (json && json.id) {
+        meData = json;
+      } else if (json && json.error) {
+        meError = json.error.message;
+      }
+    } catch (e) {
+      meError = e.message;
+    }
+
+    if (!debugData && !meData) {
+      return res.json({
+        ok: false,
+        error: meError || 'Mã Access Token không hợp lệ hoặc đã hết hạn.'
+      });
+    }
+
+    const scopes = (debugData && debugData.scopes) || [];
+    const tokenType = (debugData && debugData.type) || (meData ? 'PAGE' : 'UNKNOWN');
+    const isPageToken = tokenType === 'PAGE';
+    const expiresAt = debugData && debugData.expires_at !== undefined
+      ? (debugData.expires_at === 0 ? 'Vĩnh viễn (Never)' : new Date(debugData.expires_at * 1000).toLocaleString('vi-VN'))
+      : 'Không xác định';
+
+    const requiredScopes = [
+      { name: 'pages_show_list', desc: 'Xem danh sách Fanpage' },
+      { name: 'pages_read_engagement', desc: 'Đọc nội dung bài viết và lượt share' },
+      { name: 'pages_read_user_content', desc: 'Đọc lượt Cảm xúc (Likes) và Bình luận (Comments)', critical: true },
+      { name: 'pages_manage_posts', desc: 'Đọc chi tiết bài đăng của Trang' }
+    ];
+
+    const scopeStatus = requiredScopes.map(reqScope => ({
+      name: reqScope.name,
+      desc: reqScope.desc,
+      critical: !!reqScope.critical,
+      granted: scopes.includes(reqScope.name)
+    }));
+
+    const missingCritical = scopeStatus.filter(s => s.critical && !s.granted);
+    const missingAny = scopeStatus.filter(s => !s.granted);
+
+    let recommendation = '';
+    if (!isPageToken) {
+      recommendation = '⚠️ Đây là User Access Token, không phải Page Access Token! Vui lòng chọn Trang của bạn ở mục User or Page trên Graph Explorer.';
+    } else if (missingCritical.length > 0) {
+      recommendation = '❌ THIẾU QUYỀN QUAN TRỌNG: pages_read_user_content. Meta sẽ không cho phép đọc Lượt thích và Bình luận! Vui lòng vào Graph API Explorer thêm quyền này.';
+    } else if (missingAny.length > 0) {
+      recommendation = '⚠️ Token hợp lệ nhưng thiếu một số quyền phụ: ' + missingAny.map(s => s.name).join(', ');
+    } else {
+      recommendation = '✅ Token hoàn hảo 100%! Đầy đủ mọi quyền truy cập bài viết, Like, Bình luận, Share.';
+    }
+
+    return res.json({
+      ok: true,
+      tokenType,
+      isPageToken,
+      pageId: meData ? meData.id : (debugData ? debugData.profile_id : pageId),
+      pageName: meData ? meData.name : 'Chưa xác định',
+      appName: debugData ? debugData.application : 'Meta App',
+      expiresAt,
+      scopes,
+      scopeStatus,
+      hasPagesReadUserContent: scopes.includes('pages_read_user_content'),
+      recommendation
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 
 /**
  * 3. Trạng thái tiến trình worker hiện tại
@@ -57,11 +237,31 @@ app.post('/api/stop-job', (req, res) => {
 });
 
 /**
- * 5. Thống kê tổng quan và số bài theo từng người đăng
+ * 4.1 Xóa sạch toàn bộ dữ liệu bài viết và các đợt đồng bộ
+ */
+app.post('/api/clear-data', (req, res) => {
+  try {
+    const result = db.clearAllPostsData();
+    res.json({
+      success: true,
+      message: `Đã xóa sạch dữ liệu: ${result.deletedPosts} bài viết và ${result.deletedBatches} đợt đồng bộ.`,
+      ...result
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * 5. Thống kê tổng quan và số bài theo từng người đăng (Hỗ trợ lọc động)
  */
 app.get('/api/stats', (req, res) => {
   try {
-    const stats = db.getStats();
+    let { since, until, batchId, publisher, status, postType, search } = req.query;
+    if (since) since = normalizeDateStr(since) || since;
+    if (until) until = normalizeDateStr(until) || until;
+
+    const stats = db.getStats({ since, until, batchId, publisher, status, postType, search });
     res.json(stats);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -162,67 +362,34 @@ app.get('/api/export.csv', (req, res) => {
 });
 
 /**
- * 8.1 Xuất dữ liệu Excel (.xlsx) chuyên nghiệp
+ * 8.1 Xuất dữ liệu Excel (.xlsx) chuyên nghiệp, thẩm mỹ cao
  */
-app.get('/api/export.xlsx', (req, res) => {
+app.get('/api/export.xlsx', async (req, res) => {
   try {
-    const XLSX = require('xlsx');
+    const { generateExcelReport } = require('./excel-exporter');
     let { since, until, batchId, publisher, status, postType, search, sortBy, sortOrder } = req.query;
     if (since) since = normalizeDateStr(since) || since;
     if (until) until = normalizeDateStr(until) || until;
 
-    const posts = db.getAllPostsForExport({ since, until, batchId, publisher, status, postType, search, sortBy, sortOrder });
+    const filterObj = { since, until, batchId, publisher, status, postType, search, sortBy, sortOrder };
+    const posts = db.getAllPostsForExport(filterObj);
+    const stats = db.getStats(filterObj);
 
-    // Tạo mảng dữ liệu cho Excel
-    const excelRows = posts.map((p, idx) => {
-      let statusText = p.publisher_status;
-      if (statusText === 'FOUND') statusText = 'Đã xác định';
-      else if (statusText === 'PENDING') statusText = 'Chờ xử lý';
-      else if (statusText === 'NOT_FOUND') statusText = 'Không tìm thấy';
-      else if (statusText === 'LOGIN_REQUIRED') statusText = 'Cần đăng nhập';
-      else if (statusText === 'POST_UNAVAILABLE') statusText = 'Không khả dụng';
-      else if (statusText === 'ERROR') statusText = 'Lỗi';
+    // Xây dựng mô tả bộ lọc cho tiêu đề báo cáo Excel
+    const filterDesc = [];
+    if (batchId && batchId !== 'ALL') filterDesc.push(`Đợt: ${batchId}`);
+    if (since && until) filterDesc.push(`Từ ${since} đến ${until}`);
+    else if (since) filterDesc.push(`Từ ${since}`);
+    else if (until) filterDesc.push(`Đến ${until}`);
+    if (postType && postType !== 'ALL') filterDesc.push(`Loại: ${postType === 'SHARED' ? 'Chia sẻ' : 'Tự đăng'}`);
+    if (status && status !== 'ALL') filterDesc.push(`Trạng thái: ${status}`);
+    if (publisher) filterDesc.push(`Người đăng: ${publisher}`);
+    if (search) filterDesc.push(`Từ khóa: "${search}"`);
 
-      const postTypeText = p.post_type === 'SHARED' ? 'Chia sẻ' : 'Tự đăng';
-
-      return {
-        'STT': idx + 1,
-        'Ngày đăng': formatVNDate(p.created_time),
-        'Loại bài': postTypeText,
-        'Người đăng': p.publisher_name || 'Chưa xác định',
-        'Lượt thích (Likes)': p.likes_count || 0,
-        'Bình luận (Comments)': p.comments_count || 0,
-        'Chia sẻ (Shares)': p.shares_count || 0,
-        'Nội dung bài viết': p.message || '',
-        'Trạng thái': statusText,
-        'Link Facebook': p.permalink_url,
-        'Trang cá nhân người đăng': p.publisher_profile_url || '',
-        'ID bài viết': p.id
-      };
+    const buffer = await generateExcelReport(posts, {
+      stats,
+      filterInfo: { desc: filterDesc.length > 0 ? filterDesc.join(' | ') : 'Tất cả bài viết' }
     });
-
-    const worksheet = XLSX.utils.json_to_sheet(excelRows);
-
-    // Cài đặt độ rộng các cột cho đẹp
-    worksheet['!cols'] = [
-      { wch: 6 },  // STT
-      { wch: 22 }, // Ngày đăng
-      { wch: 14 }, // Loại bài
-      { wch: 25 }, // Người đăng
-      { wch: 18 }, // Lượt thích
-      { wch: 20 }, // Bình luận
-      { wch: 18 }, // Chia sẻ
-      { wch: 50 }, // Nội dung
-      { wch: 16 }, // Trạng thái
-      { wch: 45 }, // Link Facebook
-      { wch: 40 }, // Profile URL
-      { wch: 20 }  // ID
-    ];
-
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Thống kê bài viết');
-
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="facebook-posts-stat.xlsx"');
@@ -271,64 +438,7 @@ app.post('/api/sync-posts', async (req, res) => {
   }
 });
 
-/**
- * 9.1 Cập nhật nhanh cấu hình Fanpage & Token từ Web UI vào file .env
- */
-app.post('/api/settings', async (req, res) => {
-  try {
-    const { pageId, accessToken } = req.body;
-    if (!pageId || !pageId.trim()) {
-      return res.status(400).json({ error: 'Vui lòng nhập ID Fanpage (FB_PAGE_ID).' });
-    }
-    if (!accessToken || !accessToken.trim()) {
-      return res.status(400).json({ error: 'Vui lòng nhập Facebook Access Token.' });
-    }
 
-    const cleanPageId = pageId.trim();
-    const cleanToken = accessToken.trim();
-
-    // Phân giải và kiểm tra token với Facebook (tự động chuyển User Token -> Page Token)
-    const resolved = await resolvePageAccessToken(cleanToken, cleanPageId, config.FB_GRAPH_VERSION);
-    if (!resolved.ok) {
-      return res.status(400).json({ error: resolved.error });
-    }
-
-    const finalToken = resolved.token;
-    const finalPageId = resolved.pageId || cleanPageId;
-
-    // Lưu vĩnh viễn vào file .env
-    const envPath = path.resolve(config.ROOT_DIR, '.env');
-    let envContent = '';
-    if (fs.existsSync(envPath)) {
-      envContent = fs.readFileSync(envPath, 'utf8');
-    }
-
-    if (envContent.includes('FB_PAGE_ID=')) {
-      envContent = envContent.replace(/FB_PAGE_ID=.*/g, `FB_PAGE_ID=${finalPageId}`);
-    } else {
-      envContent = `FB_PAGE_ID=${finalPageId}\n` + envContent;
-    }
-
-    if (envContent.includes('FB_PAGE_ACCESS_TOKEN=')) {
-      envContent = envContent.replace(/FB_PAGE_ACCESS_TOKEN=.*/g, `FB_PAGE_ACCESS_TOKEN=${finalToken}`);
-    } else {
-      envContent += `\nFB_PAGE_ACCESS_TOKEN=${finalToken}\n`;
-    }
-
-    fs.writeFileSync(envPath, envContent, 'utf8');
-    config.reloadEnv();
-
-    res.json({
-      success: true,
-      message: `Đã lưu cấu hình Fanpage thành công! Trang: "${resolved.pageName || finalPageId}"`,
-      pageId: finalPageId,
-      pageName: resolved.pageName || finalPageId,
-      converted: resolved.converted
-    });
-  } catch (err) {
-    res.status(500).json({ error: `Lỗi khi lưu cấu hình: ${err.message}` });
-  }
-});
 
 /**
  * 9.2 Cập nhật nhanh Page Access Token vào .env mà không cần mở file

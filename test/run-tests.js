@@ -95,6 +95,17 @@ async function runAllTests() {
     assert.strictEqual(utils.escapeCsvField(null), '""');
   });
 
+  await test('getCanonicalPostUrl chuẩn hóa link Facebook dạng canonical', () => {
+    const urlFromParts = utils.getCanonicalPostUrl('778169405386344_122189358200946007');
+    assert.strictEqual(urlFromParts, 'https://www.facebook.com/permalink.php?story_fbid=122189358200946007&id=778169405386344');
+
+    const urlFromObj = utils.getCanonicalPostUrl({
+      id: '778169405386344_122189358200946007',
+      page_id: '778169405386344'
+    });
+    assert.strictEqual(urlFromObj, 'https://www.facebook.com/permalink.php?story_fbid=122189358200946007&id=778169405386344');
+  });
+
   // 3. PUBLISHER DETECTOR HELPERS
   describe('3. Xử lý trích xuất người đăng (src/publisher-detector.js)');
   const detector = require('../src/publisher-detector');
@@ -172,9 +183,9 @@ async function runAllTests() {
     const postAfterFound = db.getPostById(testPostId);
     assert.strictEqual(postAfterFound.publisher_name, 'Tester Admin');
     assert.strictEqual(postAfterFound.publisher_status, 'FOUND');
-    assert.strictEqual(postAfterFound.likes_count, 116, 'likes_count phải là 116');
-    assert.strictEqual(postAfterFound.comments_count, 19, 'comments_count phải là 19');
-    assert.strictEqual(postAfterFound.shares_count, 25, 'shares_count phải là 25');
+    assert.strictEqual(postAfterFound.likes_count, 10, 'likes_count phải giữ nguyên từ Graph API là 10');
+    assert.strictEqual(postAfterFound.comments_count, 5, 'comments_count phải giữ nguyên từ Graph API là 5');
+    assert.strictEqual(postAfterFound.shares_count, 2, 'shares_count phải giữ nguyên từ Graph API là 2');
     assert.strictEqual(postAfterFound.post_type, 'SHARED', 'post_type phải là SHARED');
 
     // 3. Upsert lại với tương tác mới (Graph API sync lại)
@@ -197,6 +208,19 @@ async function runAllTests() {
     assert.strictEqual(postPreserved.publisher_name, 'Tester Admin');
     assert.strictEqual(postPreserved.publisher_status, 'FOUND');
     assert.strictEqual(postPreserved.post_type, 'SHARED');
+
+    // 4. Kiểm tra updatePublisherResult không bị hạ cấp bài SHARED thành ORIGINAL
+    db.updatePublisherResult(testPostId, {
+      status: 'FOUND',
+      name: 'Tester Admin',
+      postType: 'ORIGINAL'
+    });
+    const postNotDowngraded = db.getPostById(testPostId);
+    assert.strictEqual(postNotDowngraded.post_type, 'SHARED', 'Bài viết SHARED tuyệt đối không bị hạ cấp thành ORIGINAL');
+  });
+
+  await test('clearAllPostsData là hàm hợp lệ và hỗ trợ dọn dẹp dữ liệu', () => {
+    assert.strictEqual(typeof db.clearAllPostsData, 'function');
   });
 
   await test('getStats và getPublishersList phản ánh chính xác các trường mới', () => {
@@ -216,6 +240,20 @@ async function runAllTests() {
     const tester = summary.find(s => s.publisher_name === 'Tester Admin');
     assert.ok(tester, 'Tester Admin phải có trong summary');
     assert.ok(tester.count >= 1);
+  });
+
+  await test('getStats hỗ trợ lọc động theo search, postType, publisher', () => {
+    const statsFiltered = db.getStats({ search: 'thử nghiệm' });
+    assert.ok(statsFiltered.totalPosts >= 1, 'Lọc search phải có kết quả');
+    
+    const statsPub = db.getStats({ publisher: 'Tester Admin' });
+    assert.ok(statsPub.totalPosts >= 1, 'Lọc theo publisher phải trả về bài viết');
+    assert.ok(statsPub.found >= 1, 'Số bài found phải >= 1');
+
+    const statsNone = db.getStats({ search: 'chuoi_khong_ton_tai_99999' });
+    assert.strictEqual(statsNone.totalPosts, 0);
+    assert.strictEqual(statsNone.totalEngagements, 0);
+    assert.strictEqual(statsNone.publisherCount, 0);
   });
 
   await test('getPosts hỗ trợ lọc theo postType và sắp xếp theo tương tác', () => {
@@ -325,7 +363,10 @@ async function runAllTests() {
     assert.ok(arrayBuffer.byteLength > 1000, 'Kích thước file Excel hợp lệ');
   });
 
-  // Dọn dẹp server
+  // Dọn dẹp dữ liệu test trong SQLite và đóng testServer
+  try {
+    db.getDb().prepare("DELETE FROM posts WHERE id LIKE 'test_%' OR page_id = 'page_123'").run();
+  } catch (e) {}
   await new Promise(resolve => testServer.close(resolve));
 
   console.log('\n====================================================');

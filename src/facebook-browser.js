@@ -35,14 +35,66 @@ async function getBrowserContext(customOptions = {}) {
     locale: 'vi-VN',
     timezoneId: config.TZ,
     userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    serviceWorkers: 'block',
     args: [
       '--disable-blink-features=AutomationControlled',
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-infobars',
+      '--disable-gpu',
+      '--disable-extensions',
+      '--mute-audio',
+      '--blink-settings=imagesEnabled=false',
+      '--disable-remote-fonts',
+      '--disable-background-networking',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+      '--disable-breakpad',
+      '--disable-component-update',
+      '--disable-default-apps',
+      '--disable-hang-monitor',
+      '--disable-prompt-on-repost',
+      '--disable-sync',
+      '--enable-features=NetworkService,NetworkServiceInProcess',
+      '--disable-features=Translate,BackForwardCache,AcceptCHFrame,MediaRouter,OptimizationHints,IsolateOrigins,site-per-process',
+      '--no-first-run',
       '--window-size=1280,800'
     ]
+  });
+
+  // Chặn tải hình ảnh, phông chữ, stream video/audio và tracking để tăng tốc tối đa (tiết kiệm 70-85% thời gian và băng thông)
+  await globalContext.route('**/*', (route) => {
+    const req = route.request();
+    const resourceType = req.resourceType();
+    const url = req.url().toLowerCase();
+    if (
+      resourceType === 'image' ||
+      resourceType === 'font' ||
+      resourceType === 'media' ||
+      resourceType === 'ping' ||
+      resourceType === 'beacon' ||
+      resourceType === 'csp_report' ||
+      url.endsWith('.mp4') ||
+      url.endsWith('.webm') ||
+      url.endsWith('.mp3') ||
+      url.includes('google-analytics') ||
+      url.includes('doubleclick') ||
+      url.includes('clarity.ms') ||
+      url.includes('/ajax/bz') ||
+      url.includes('/browser_reporting') ||
+      url.includes('/ajax/haste-response/') ||
+      url.includes('logging_client_events') ||
+      url.includes('connect.facebook.net') ||
+      url.includes('instagram.com') ||
+      url.includes('threads.net') ||
+      url.includes('/video/') ||
+      url.includes('video_channel')
+    ) {
+      return route.abort();
+    }
+    route.continue();
   });
 
   await globalContext.addInitScript(() => {

@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('./config');
-const { maskToken, vnDateToUtcTimestamp, sleep } = require('./utils');
+const { maskToken, vnDateToUtcTimestamp, sleep, getCanonicalPostUrl } = require('./utils');
 const { resolvePageAccessToken } = require('./token-resolver');
 
 /**
@@ -50,7 +50,7 @@ async function fetchPagePosts(sinceDate, untilDate, options = {}) {
   const initialUrl = new URL(`https://graph.facebook.com/${version}/${pageId}/posts`);
   initialUrl.searchParams.set(
     'fields',
-    'id,message,created_time,permalink_url,shares,status_type,parent_id,reactions.summary(total_count).limit(0).as(reactions),comments.summary(total_count).limit(0).as(comments)'
+    'id,message,created_time,permalink_url,shares,status_type,parent_id,story,attachments{media_type,type,unshimmed_url,title,target},reactions.summary(total_count).limit(0).as(reactions),comments.summary(total_count).limit(0).as(comments)'
   );
   initialUrl.searchParams.set('limit', '100');
   initialUrl.searchParams.set('since', String(sinceTimestamp));
@@ -91,7 +91,7 @@ async function fetchPagePosts(sinceDate, untilDate, options = {}) {
           if (errCode === 10 || errMsg.includes('pages_read_user_content')) {
             console.warn(`[API] Token chưa có quyền 'pages_read_user_content'. Tự động chuyển sang fields cơ bản (lấy bài viết + shares + type)...`);
             const fallbackUrl = new URL(nextUrl);
-            fallbackUrl.searchParams.set('fields', 'id,message,created_time,permalink_url,shares,status_type,parent_id');
+            fallbackUrl.searchParams.set('fields', 'id,message,created_time,permalink_url,shares,status_type,parent_id,story,attachments{media_type,type,unshimmed_url,title,target}');
             nextUrl = fallbackUrl.toString();
             const fbRes = await fetch(nextUrl, {
               method: 'GET',
@@ -137,14 +137,31 @@ async function fetchPagePosts(sinceDate, untilDate, options = {}) {
       const likesCount = p.reactions?.summary?.total_count ?? p.likes?.summary?.total_count ?? 0;
       const commentsCount = p.comments?.summary?.total_count ?? 0;
       const sharesCount = p.shares?.count ?? 0;
-      const postType = (p.parent_id || p.status_type === 'shared_story') ? 'SHARED' : 'ORIGINAL';
+
+      // Phân loại bài viết chính xác:
+      // 1. Có parent_id (chia sẻ từ một bài viết cha khác)
+      // 2. status_type là 'shared_story'
+      // 3. story có chứa 'chia sẻ' hoặc 'shared'
+      // 4. attachments có type là 'share' hoặc link bài viết nguồn khác
+      const storyLower = (p.story || '').toLowerCase();
+      const isShared = Boolean(
+        p.parent_id ||
+        p.status_type === 'shared_story' ||
+        storyLower.includes('chia sẻ') ||
+        storyLower.includes('shared') ||
+        p.attachments?.data?.some(att => 
+          att.type === 'share' ||
+          (att.type === 'link' && att.unshimmed_url && att.unshimmed_url.includes('facebook.com') && !att.unshimmed_url.includes(pageId))
+        )
+      );
+      const postType = isShared ? 'SHARED' : 'ORIGINAL';
 
       allPosts.push({
         id: p.id,
         page_id: pageId,
         message: p.message || '',
         created_time: p.created_time,
-        permalink_url: p.permalink_url || `https://www.facebook.com/${p.id}`,
+        permalink_url: getCanonicalPostUrl(p, pageId) || p.permalink_url || `https://www.facebook.com/${p.id}`,
         likes_count: likesCount,
         comments_count: commentsCount,
         shares_count: sharesCount,

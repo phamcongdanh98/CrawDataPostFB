@@ -165,6 +165,33 @@ function escapeCsvField(val) {
   return `"${str}"`;
 }
 
+/**
+ * Chuẩn hóa URL bài viết Facebook chuẩn canonical
+ * Sử dụng định dạng: https://www.facebook.com/permalink.php?story_fbid=${storyFbid}&id=${pageId}
+ * Giúp người dùng mở bài viết trực tiếp luôn thành công, không bị lỗi 404 do App-Scoped ID từ Graph API
+ * @param {Object|string} postOrId - Đối tượng post hoặc ID post dạng pageId_storyFbid
+ * @param {string} [maybePageId] - ID fanpage
+ * @returns {string} URL bài viết chuẩn
+ */
+function getCanonicalPostUrl(postOrId, maybePageId) {
+  if (!postOrId) return '';
+  const id = typeof postOrId === 'object' ? postOrId.id : postOrId;
+  const pageId = (typeof postOrId === 'object' ? postOrId.page_id : maybePageId) || '';
+
+  if (typeof id === 'string' && id.includes('_')) {
+    const parts = id.split('_');
+    const pid = pageId || parts[0];
+    const storyFbid = parts[1];
+    if (pid && storyFbid) {
+      return `https://www.facebook.com/permalink.php?story_fbid=${storyFbid}&id=${pid}`;
+    }
+  }
+  if (typeof postOrId === 'object' && postOrId.permalink_url) {
+    return postOrId.permalink_url;
+  }
+  return typeof postOrId === 'string' ? postOrId : '';
+}
+
 module.exports = {
   maskToken,
   normalizeDateStr,
@@ -176,5 +203,7 @@ module.exports = {
   sleep,
   getRandomDelay,
   truncate,
-  escapeCsvField
+  escapeCsvField,
+  getCanonicalPostUrl
 };
+
