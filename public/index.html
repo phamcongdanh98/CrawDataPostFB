@@ -117,12 +117,27 @@
     </section>
 
     <!-- Metrics Cards -->
+    <!-- Metrics Cards -->
     <section class="metrics-grid">
       <div class="card metric-card">
         <div class="metric-icon icon-total">📄</div>
         <div class="metric-info">
           <span class="metric-label">Tổng bài viết</span>
           <h3 id="statTotalPosts" class="metric-value">0</h3>
+        </div>
+      </div>
+      <div class="card metric-card">
+        <div class="metric-icon icon-original">📝</div>
+        <div class="metric-info">
+          <span class="metric-label">Bài tự đăng</span>
+          <h3 id="statOriginalPosts" class="metric-value text-accent">0</h3>
+        </div>
+      </div>
+      <div class="card metric-card">
+        <div class="metric-icon icon-shared">🔄</div>
+        <div class="metric-info">
+          <span class="metric-label">Bài chia sẻ</span>
+          <h3 id="statSharedPosts" class="metric-value text-purple">0</h3>
         </div>
       </div>
       <div class="card metric-card">
@@ -140,10 +155,10 @@
         </div>
       </div>
       <div class="card metric-card">
-        <div class="metric-icon icon-error">⚠️</div>
+        <div class="metric-icon icon-heart">💖</div>
         <div class="metric-info">
-          <span class="metric-label">Lỗi / Không xem được</span>
-          <h3 id="statErrors" class="metric-value text-danger">0</h3>
+          <span class="metric-label">Tổng tương tác</span>
+          <h3 id="statTotalEngagements" class="metric-value text-pink" title="Tổng lượt Thích + Bình luận + Chia sẻ">0</h3>
         </div>
       </div>
       <div class="card metric-card">
@@ -210,14 +225,28 @@
           </div>
         </div>
         <div class="posts-filters">
-          <input type="text" id="filterSearch" placeholder="Tìm nội dung / ID / Người..." class="input-sm">
-          <select id="filterStatus" class="select-sm">
+          <!-- Filter Loại bài viết -->
+          <select id="filterPostType" class="select-sm" title="Lọc theo loại bài viết">
+            <option value="ALL">Tất cả loại bài</option>
+            <option value="ORIGINAL">📝 Bài tự đăng</option>
+            <option value="SHARED">🔄 Bài chia sẻ</option>
+          </select>
+
+          <!-- Filter Người đăng -->
+          <select id="filterPublisherSelect" class="select-sm" title="Lọc theo người đăng">
+            <option value="">Tất cả người đăng</option>
+          </select>
+
+          <!-- Filter Trạng thái -->
+          <select id="filterStatus" class="select-sm" title="Lọc theo trạng thái xử lý">
             <option value="ALL">Tất cả trạng thái</option>
             <option value="FOUND">Đã xác định (FOUND)</option>
             <option value="PENDING">Chờ xử lý (PENDING)</option>
             <option value="NOT_FOUND">Không tìm thấy (NOT_FOUND)</option>
             <option value="ERROR">Lỗi / Unavailable</option>
           </select>
+
+          <input type="text" id="filterSearch" placeholder="Tìm nội dung / ID / Người..." class="input-sm">
           <button id="btnRefreshList" class="btn btn-sm btn-outline">Làm mới</button>
         </div>
       </div>
@@ -231,17 +260,32 @@
         <table class="data-table" id="postsTable">
           <thead>
             <tr>
-              <th style="width: 135px;">Ngày đăng</th>
-              <th style="width: 150px;">Người đăng</th>
+              <th style="width: 140px;" class="col-sortable" data-sort="created_time" title="Bấm để sắp xếp theo Ngày đăng">
+                <div class="th-sort-wrapper">
+                  <span>Ngày đăng</span>
+                  <span class="sort-indicator" id="sortIndicator-created_time">▼</span>
+                </div>
+              </th>
+              <th style="width: 110px; text-align: center;">Loại bài</th>
+              <th style="width: 160px;">Người đăng</th>
               <th>Nội dung bài viết</th>
-              <th style="width: 130px; text-align: center;">Tương tác</th>
+              <th style="width: 180px; text-align: center;">
+                <div class="th-interaction-title">
+                  <span>Tương tác</span>
+                  <div class="interaction-sort-buttons">
+                    <button type="button" class="btn-sort-metric" data-sort="likes_count" title="Sắp xếp theo Lượt Thích">❤️</button>
+                    <button type="button" class="btn-sort-metric" data-sort="comments_count" title="Sắp xếp theo Bình luận">💬</button>
+                    <button type="button" class="btn-sort-metric" data-sort="shares_count" title="Sắp xếp theo Chia sẻ">🔁</button>
+                  </div>
+                </div>
+              </th>
               <th style="width: 110px; text-align: center;">Trạng thái</th>
-              <th style="width: 70px; text-align: center;">Link</th>
+              <th style="width: 65px; text-align: center;">Link</th>
             </tr>
           </thead>
           <tbody id="postsTableBody">
             <tr>
-              <td colspan="6" class="empty-cell">Chưa có dữ liệu trong khoảng thời gian này.</td>
+              <td colspan="7" class="empty-cell">Chưa có dữ liệu trong khoảng thời gian này.</td>
             </tr>
           </tbody>
         </table>

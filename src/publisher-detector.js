@@ -181,7 +181,114 @@ async function detectPublisher(page, options = {}) {
         };
       }
 
-      // 2.3 Các cụm từ khóa nhận diện người đăng
+      // 2.3 Trích xuất chỉ số tương tác (Likes/Reactions, Comments, Shares) & Phân loại bài viết
+      function extractMetricsAndType() {
+        let likes = null;
+        let comments = null;
+        let shares = null;
+
+        function parseCount(text) {
+          if (!text || typeof text !== 'string') return null;
+          const clean = text.trim().replace(/[\u034f\u200b-\u200f\u202a-\u202e\ufeff]/g, '');
+          const m = clean.match(/([\d,.]+)\s*([kKmM]?)/);
+          if (!m) return null;
+          let val = m[1];
+          const unit = m[2].toLowerCase();
+          if (unit === 'k') {
+            val = val.replace(',', '.');
+            return Math.round(parseFloat(val) * 1000);
+          }
+          if (unit === 'm') {
+            val = val.replace(',', '.');
+            return Math.round(parseFloat(val) * 1000000);
+          }
+          if (/^\d{1,3}[,.]\d{3}$/.test(val)) {
+            val = val.replace(/[,.]/g, '');
+          }
+          const parsed = parseInt(val, 10);
+          return isNaN(parsed) ? null : parsed;
+        }
+
+        // Phân loại bài viết (ORIGINAL hay SHARED)
+        const fullBodyText = document.body ? document.body.innerText : '';
+        const lowerBody = fullBodyText.toLowerCase();
+        const shareIndicators = [
+          'đã chia sẻ một bài viết',
+          'đã chia sẻ bài viết',
+          'đã chia sẻ liên kết',
+          'đã chia sẻ một kỷ niệm',
+          'shared a post',
+          'shared a link'
+        ];
+        const isShared = shareIndicators.some(ind => lowerBody.includes(ind));
+        const postType = isShared ? 'SHARED' : 'ORIGINAL';
+
+        // Quét các nút tương tác và aria-labels
+        const buttons = Array.from(document.querySelectorAll('[role="button"], [aria-label]'));
+        for (const btn of buttons) {
+          const ariaLabel = (btn.getAttribute('aria-label') || '').trim();
+          const lowerLabel = ariaLabel.toLowerCase();
+          const btnText = (btn.innerText || '').trim();
+
+          // 1. Likes / Reactions
+          if (likes === null) {
+            if (/^(?:Thích|Gỡ Thích|Bày tỏ cảm xúc|Like|Remove Like)$/i.test(ariaLabel) && btnText) {
+              const parsed = parseCount(btnText);
+              if (parsed !== null && parsed > 0) likes = parsed;
+            } else if (lowerLabel.includes('thích:') || lowerLabel.includes('người khác')) {
+              const parsed = parseCount(ariaLabel);
+              if (parsed !== null && parsed > 0) likes = parsed;
+            }
+          }
+
+          // 2. Comments / Bình luận
+          if (comments === null) {
+            if ((lowerLabel.includes('bình luận') || lowerLabel.includes('viết bình luận') || lowerLabel.includes('comment')) && btnText) {
+              const parsed = parseCount(btnText);
+              if (parsed !== null && parsed >= 0) comments = parsed;
+            } else if (lowerLabel.includes('bình luận') && /\d+/.test(ariaLabel)) {
+              const parsed = parseCount(ariaLabel);
+              if (parsed !== null && parsed >= 0) comments = parsed;
+            }
+          }
+
+          // 3. Shares / Chia sẻ
+          if (shares === null) {
+            if ((lowerLabel.includes('gửi nội dung này cho bạn bè') || lowerLabel.includes('chia sẻ') || lowerLabel.includes('share')) && btnText) {
+              const parsed = parseCount(btnText);
+              if (parsed !== null && parsed >= 0) shares = parsed;
+            } else if ((lowerLabel.includes('lượt chia sẻ') || lowerLabel.includes('chia sẻ')) && /\d+/.test(ariaLabel)) {
+              const parsed = parseCount(ariaLabel);
+              if (parsed !== null && parsed >= 0) shares = parsed;
+            }
+          }
+        }
+
+        // Quét các thẻ văn bản độc lập (nếu nút bấm không có text trực tiếp)
+        if (likes === null || comments === null || shares === null) {
+          const allSpans = Array.from(document.querySelectorAll('span, div')).filter(el => el.children.length === 0);
+          for (const s of allSpans) {
+            const t = (s.innerText || '').trim();
+            if (!t) continue;
+            const lower = t.toLowerCase();
+
+            if (comments === null && (lower.includes('bình luận') || lower.includes('comment'))) {
+              const parsed = parseCount(t);
+              if (parsed !== null) comments = parsed;
+            }
+            if (shares === null && (lower.includes('chia sẻ') || lower.includes('share'))) {
+              const parsed = parseCount(t);
+              if (parsed !== null) shares = parsed;
+            }
+          }
+        }
+
+        return { likes, comments, shares, postType };
+      }
+
+      const metricsAndType = extractMetricsAndType();
+
+      // 2.4 Các cụm từ khóa nhận diện người đăng
       const labelKeywords = [
         'người đăng:',
         'người đăng',
@@ -256,7 +363,8 @@ async function detectPublisher(page, options = {}) {
                 name: firstLine,
                 href: matchingAnchor ? matchingAnchor.href : null,
                 rawText: text.substring(0, 100),
-                method: matchingAnchor ? 'published-by-name-matched-anchor' : 'published-by-text-split'
+                method: matchingAnchor ? 'published-by-name-matched-anchor' : 'published-by-text-split',
+                metrics: metricsAndType
               };
             }
           }
@@ -271,7 +379,8 @@ async function detectPublisher(page, options = {}) {
                 name: aText,
                 href: anchor.href,
                 rawText: text.substring(0, 100),
-                method: 'published-by-inner-anchor'
+                method: 'published-by-inner-anchor',
+                metrics: metricsAndType
               };
             }
           }
@@ -288,7 +397,8 @@ async function detectPublisher(page, options = {}) {
                 name: cleanNextText,
                 href: nextAnchor ? nextAnchor.href : null,
                 rawText: `${text} ${cleanNextText}`,
-                method: 'published-by-sibling-anchor'
+                method: 'published-by-sibling-anchor',
+                metrics: metricsAndType
               };
             }
           }
@@ -309,7 +419,8 @@ async function detectPublisher(page, options = {}) {
             name: rawName,
             href: htmlMatch[1].replace(/&amp;/g, '&'),
             rawText: `Người đăng: ${rawName}`,
-            method: 'published-by-html-anchor-regex'
+            method: 'published-by-html-anchor-regex',
+            metrics: metricsAndType
           };
         }
       }
@@ -327,16 +438,24 @@ async function detectPublisher(page, options = {}) {
             name: candidate,
             href: null,
             rawText: match[0].trim(),
-            method: 'published-by-body-regex'
+            method: 'published-by-body-regex',
+            metrics: metricsAndType
           };
         }
       }
 
       return {
         status: 'NOT_FOUND',
-        reason: 'Không tìm thấy vùng thông tin người đăng'
+        reason: 'Không tìm thấy vùng thông tin người đăng',
+        metrics: metricsAndType
       };
     }, pageName);
+
+    const extractedMetrics = evaluation.metrics || {};
+    const likes = typeof extractedMetrics.likes === 'number' ? extractedMetrics.likes : null;
+    const comments = typeof extractedMetrics.comments === 'number' ? extractedMetrics.comments : null;
+    const shares = typeof extractedMetrics.shares === 'number' ? extractedMetrics.shares : null;
+    const postType = extractedMetrics.postType || 'ORIGINAL';
 
     // 3. Xử lý kết quả từ evaluate
     if (evaluation.status === 'FOUND') {
@@ -349,7 +468,11 @@ async function detectPublisher(page, options = {}) {
           id: publisherId,
           profileUrl,
           rawText: evaluation.rawText || `Đăng bởi ${cleanName}`,
-          method: evaluation.method || 'published-by-label'
+          method: evaluation.method || 'published-by-label',
+          likes,
+          comments,
+          shares,
+          postType
         };
       }
     }
@@ -362,7 +485,11 @@ async function detectPublisher(page, options = {}) {
         profileUrl: null,
         rawText: null,
         method: null,
-        reason: evaluation.reason
+        reason: evaluation.reason,
+        likes,
+        comments,
+        shares,
+        postType
       };
     }
 
@@ -392,7 +519,11 @@ async function detectPublisher(page, options = {}) {
       rawText: null,
       method: null,
       reason: evaluation.reason || 'Không tìm thấy vùng thông tin người đăng',
-      debugPath
+      debugPath,
+      likes,
+      comments,
+      shares,
+      postType
     };
   } catch (error) {
     const debugPath = await saveDebugSnapshot(page, postId, {

@@ -155,19 +155,27 @@ async function runAllTests() {
     });
     assert.strictEqual(res1.inserted, true);
 
-    // 2. Cập nhật publisher FOUND
+    // 2. Cập nhật publisher FOUND kèm tương tác và post_type
     db.updatePublisherResult(testPostId, {
       status: 'FOUND',
       name: 'Tester Admin',
       id: '999999',
       profileUrl: 'https://facebook.com/tester.admin',
       rawText: 'Người đăng: Tester Admin',
-      method: 'test-method'
+      method: 'test-method',
+      likes: 116,
+      comments: 19,
+      shares: 25,
+      postType: 'SHARED'
     });
 
     const postAfterFound = db.getPostById(testPostId);
     assert.strictEqual(postAfterFound.publisher_name, 'Tester Admin');
     assert.strictEqual(postAfterFound.publisher_status, 'FOUND');
+    assert.strictEqual(postAfterFound.likes_count, 116, 'likes_count phải là 116');
+    assert.strictEqual(postAfterFound.comments_count, 19, 'comments_count phải là 19');
+    assert.strictEqual(postAfterFound.shares_count, 25, 'shares_count phải là 25');
+    assert.strictEqual(postAfterFound.post_type, 'SHARED', 'post_type phải là SHARED');
 
     // 3. Upsert lại với tương tác mới (Graph API sync lại)
     const res2 = db.upsertPost({
@@ -179,6 +187,7 @@ async function runAllTests() {
       likes_count: 50,
       comments_count: 20,
       shares_count: 10,
+      post_type: 'SHARED',
       sync_batch_id: batchId
     });
     assert.strictEqual(res2.updated, true);
@@ -187,14 +196,20 @@ async function runAllTests() {
     const postPreserved = db.getPostById(testPostId);
     assert.strictEqual(postPreserved.publisher_name, 'Tester Admin');
     assert.strictEqual(postPreserved.publisher_status, 'FOUND');
-    assert.strictEqual(postPreserved.likes_count, 50);
+    assert.strictEqual(postPreserved.post_type, 'SHARED');
   });
 
-  await test('getStats và getPublishersList phản ánh chính xác', () => {
+  await test('getStats và getPublishersList phản ánh chính xác các trường mới', () => {
     const stats = db.getStats();
     assert.strictEqual(typeof stats.totalPosts, 'number');
     assert.ok(stats.totalPosts >= 1);
     assert.ok(stats.found >= 1);
+    assert.strictEqual(typeof stats.originalPosts, 'number');
+    assert.strictEqual(typeof stats.sharedPosts, 'number');
+    assert.strictEqual(typeof stats.totalLikes, 'number');
+    assert.strictEqual(typeof stats.totalComments, 'number');
+    assert.strictEqual(typeof stats.totalShares, 'number');
+    assert.strictEqual(typeof stats.totalEngagements, 'number');
 
     const summary = db.getPublishersList();
     assert.ok(Array.isArray(summary));
@@ -203,10 +218,19 @@ async function runAllTests() {
     assert.ok(tester.count >= 1);
   });
 
-  await test('getPosts hỗ trợ phân trang và tìm kiếm theo nội dung', () => {
+  await test('getPosts hỗ trợ lọc theo postType và sắp xếp theo tương tác', () => {
     const resSearch = db.getPosts({ search: 'thử nghiệm', page: 1, limit: 10 });
     assert.ok(resSearch.total >= 1);
     assert.ok(resSearch.items.length >= 1);
+
+    const resShared = db.getPosts({ postType: 'SHARED', page: 1, limit: 10 });
+    assert.ok(Array.isArray(resShared.items));
+    if (resShared.items.length > 0) {
+      assert.strictEqual(resShared.items[0].post_type, 'SHARED');
+    }
+
+    const resSorted = db.getPosts({ sortBy: 'likes_count', sortOrder: 'DESC', page: 1, limit: 10 });
+    assert.ok(Array.isArray(resSorted.items));
   });
 
   // 5. PLAYWRIGHT CHROMIUM
@@ -226,15 +250,14 @@ async function runAllTests() {
 
   // 6. EXPRESS SERVER VÀ API ENDPOINTS
   describe('6. Máy chủ Express & API Endpoints');
-  const { app, server } = require('../src/server');
+  const { app } = require('../src/server');
 
-  // Đợi server lắng nghe
-  await new Promise(resolve => {
-    if (server.listening) return resolve();
-    server.on('listening', resolve);
+  // Khởi chạy testServer trên cổng ngẫu nhiên rảnh để không xung đột port
+  const testServer = await new Promise(resolve => {
+    const s = app.listen(0, () => resolve(s));
   });
 
-  const address = server.address();
+  const address = testServer.address();
   const port = address.port;
   const baseUrl = `http://localhost:${port}`;
 
@@ -290,7 +313,7 @@ async function runAllTests() {
     assert.strictEqual(bytes[1], 0xBB, 'Byte 2 phải là 0xBB');
     assert.strictEqual(bytes[2], 0xBF, 'Byte 3 phải là 0xBF');
     const text = new TextDecoder().decode(bytes);
-    assert.ok(text.includes('STT,Ngày đăng,Người đăng'));
+    assert.ok(text.includes('STT,Ngày đăng,Loại bài viết,Người đăng'));
   });
 
   await test('GET /api/export.xlsx xuất file Excel định dạng bảng tính hợp lệ', async () => {
@@ -303,7 +326,7 @@ async function runAllTests() {
   });
 
   // Dọn dẹp server
-  await new Promise(resolve => server.close(resolve));
+  await new Promise(resolve => testServer.close(resolve));
 
   console.log('\n====================================================');
   console.log(`📊 TỔNG KẾT KIỂM THỬ: ${passedTests}/${totalTests} TESTS PASS`);

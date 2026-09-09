@@ -93,18 +93,21 @@ app.get('/api/batches', (req, res) => {
 });
 
 /**
- * 7. Danh sách bài viết có phân trang và bộ lọc (hỗ trợ batchId)
+ * 7. Danh sách bài viết có phân trang và bộ lọc (hỗ trợ batchId, postType, sortBy, sortOrder)
  */
 app.get('/api/posts', (req, res) => {
   try {
-    const { since, until, batchId, publisher, status, search, page = 1, limit = 20 } = req.query;
+    const { since, until, batchId, publisher, status, postType, search, sortBy, sortOrder, page = 1, limit = 20 } = req.query;
     const result = db.getPosts({
       since,
       until,
       batchId,
       publisher,
       status,
+      postType,
       search,
+      sortBy,
+      sortOrder,
       page: parseInt(page, 10),
       limit: parseInt(limit, 10)
     });
@@ -119,22 +122,24 @@ app.get('/api/posts', (req, res) => {
  */
 app.get('/api/export.csv', (req, res) => {
   try {
-    let { since, until, batchId, publisher, status, search } = req.query;
+    let { since, until, batchId, publisher, status, postType, search, sortBy, sortOrder } = req.query;
     if (since) since = normalizeDateStr(since) || since;
     if (until) until = normalizeDateStr(until) || until;
 
-    const posts = db.getAllPostsForExport({ since, until, batchId, publisher, status, search });
+    const posts = db.getAllPostsForExport({ since, until, batchId, publisher, status, postType, search, sortBy, sortOrder });
 
     // UTF-8 BOM để Excel hiển thị đúng tiếng Việt
     let csv = '\uFEFF';
-    csv += 'STT,Ngày đăng,Người đăng,Lượt thích (Likes),Bình luận (Comments),Chia sẻ (Shares),Nội dung bài viết,Trạng thái,Link Facebook,Publisher Profile URL,ID bài viết\n';
+    csv += 'STT,Ngày đăng,Loại bài viết,Người đăng,Lượt thích (Likes),Bình luận (Comments),Chia sẻ (Shares),Nội dung bài viết,Trạng thái,Link Facebook,Publisher Profile URL,ID bài viết\n';
 
     let index = 1;
     for (const p of posts) {
       const formattedDate = formatVNDate(p.created_time);
+      const postTypeText = p.post_type === 'SHARED' ? 'Chia sẻ' : 'Tự đăng';
       const row = [
         index++,
         escapeCsvField(formattedDate),
+        escapeCsvField(postTypeText),
         escapeCsvField(p.publisher_name || ''),
         p.likes_count || 0,
         p.comments_count || 0,
@@ -162,11 +167,11 @@ app.get('/api/export.csv', (req, res) => {
 app.get('/api/export.xlsx', (req, res) => {
   try {
     const XLSX = require('xlsx');
-    let { since, until, batchId, publisher, status, search } = req.query;
+    let { since, until, batchId, publisher, status, postType, search, sortBy, sortOrder } = req.query;
     if (since) since = normalizeDateStr(since) || since;
     if (until) until = normalizeDateStr(until) || until;
 
-    const posts = db.getAllPostsForExport({ since, until, batchId, publisher, status, search });
+    const posts = db.getAllPostsForExport({ since, until, batchId, publisher, status, postType, search, sortBy, sortOrder });
 
     // Tạo mảng dữ liệu cho Excel
     const excelRows = posts.map((p, idx) => {
@@ -178,9 +183,12 @@ app.get('/api/export.xlsx', (req, res) => {
       else if (statusText === 'POST_UNAVAILABLE') statusText = 'Không khả dụng';
       else if (statusText === 'ERROR') statusText = 'Lỗi';
 
+      const postTypeText = p.post_type === 'SHARED' ? 'Chia sẻ' : 'Tự đăng';
+
       return {
         'STT': idx + 1,
         'Ngày đăng': formatVNDate(p.created_time),
+        'Loại bài': postTypeText,
         'Người đăng': p.publisher_name || 'Chưa xác định',
         'Lượt thích (Likes)': p.likes_count || 0,
         'Bình luận (Comments)': p.comments_count || 0,
@@ -199,6 +207,7 @@ app.get('/api/export.xlsx', (req, res) => {
     worksheet['!cols'] = [
       { wch: 6 },  // STT
       { wch: 22 }, // Ngày đăng
+      { wch: 14 }, // Loại bài
       { wch: 25 }, // Người đăng
       { wch: 18 }, // Lượt thích
       { wch: 20 }, // Bình luận
@@ -495,26 +504,31 @@ app.post('/api/test-post', async (req, res) => {
   }
 });
 
-const server = app.listen(config.PORT, () => {
-  console.log(`\n======================================================`);
-  console.log(`🚀 Fanpage Publisher Stat Server đang chạy tại:`);
-  console.log(`👉 http://localhost:${config.PORT}`);
-  console.log(`======================================================\n`);
-});
+let server = null;
+if (require.main === module) {
+  server = app.listen(config.PORT, () => {
+    console.log(`\n======================================================`);
+    console.log(`🚀 Fanpage Publisher Stat Server đang chạy tại:`);
+    console.log(`👉 http://localhost:${config.PORT}`);
+    console.log(`======================================================\n`);
+  });
+
+  function shutdown() {
+    console.log('\n[Server] Đang tắt máy chủ...');
+    if (server) {
+      server.close(() => {
+        db.closeDb();
+        console.log('[Server] Đã đóng kết nối SQLite và dừng máy chủ.');
+        process.exit(0);
+      });
+    }
+  }
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+}
 
 // Khởi tạo Database khi server start
 db.getDb();
-
-function shutdown() {
-  console.log('\n[Server] Đang tắt máy chủ...');
-  server.close(() => {
-    db.closeDb();
-    console.log('[Server] Đã đóng kết nối SQLite và dừng máy chủ.');
-    process.exit(0);
-  });
-}
-
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
 
 module.exports = { app, server };

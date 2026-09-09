@@ -5,7 +5,10 @@ const state = {
   batchId: 'ALL',
   publisher: '',
   status: 'ALL',
+  postType: 'ALL',
   search: '',
+  sortBy: 'created_time',
+  sortOrder: 'DESC',
   page: 1,
   limit: 20,
   totalPages: 1,
@@ -44,9 +47,12 @@ const btnStopJob = document.getElementById('btnStopJob');
 
 // Metrics Cards
 const statTotalPosts = document.getElementById('statTotalPosts');
+const statOriginalPosts = document.getElementById('statOriginalPosts');
+const statSharedPosts = document.getElementById('statSharedPosts');
 const statFound = document.getElementById('statFound');
 const statPending = document.getElementById('statPending');
 const statErrors = document.getElementById('statErrors');
+const statTotalEngagements = document.getElementById('statTotalEngagements');
 const statPublishersCount = document.getElementById('statPublishersCount');
 
 // Navigation Tabs
@@ -69,6 +75,8 @@ const btnRefreshBatches = document.getElementById('btnRefreshBatches');
 // View 2: Posts Table
 const postsTableBody = document.getElementById('postsTableBody');
 const filterBatchSelect = document.getElementById('filterBatchSelect');
+const filterPostType = document.getElementById('filterPostType');
+const filterPublisherSelect = document.getElementById('filterPublisherSelect');
 const filterSearch = document.getElementById('filterSearch');
 const filterStatus = document.getElementById('filterStatus');
 const btnRefreshList = document.getElementById('btnRefreshList');
@@ -300,7 +308,10 @@ function updateExportLinks() {
   if (state.batchId && state.batchId !== 'ALL') params.set('batchId', state.batchId);
   if (state.publisher) params.set('publisher', state.publisher);
   if (state.status !== 'ALL') params.set('status', state.status);
+  if (state.postType && state.postType !== 'ALL') params.set('postType', state.postType);
   if (state.search) params.set('search', state.search);
+  if (state.sortBy) params.set('sortBy', state.sortBy);
+  if (state.sortOrder) params.set('sortOrder', state.sortOrder);
 
   const query = params.toString() ? `?${params.toString()}` : '';
   btnExportExcel.href = `/api/export.xlsx${query}`;
@@ -427,18 +438,42 @@ async function fetchStats() {
     const data = await res.json();
 
     statTotalPosts.textContent = (data.totalPosts || 0).toLocaleString();
+    if (statOriginalPosts) statOriginalPosts.textContent = (data.originalPosts || 0).toLocaleString();
+    if (statSharedPosts) statSharedPosts.textContent = (data.sharedPosts || 0).toLocaleString();
     statFound.textContent = (data.found || 0).toLocaleString();
     statPending.textContent = (data.pending || 0).toLocaleString();
     statErrors.textContent = (data.errors || 0).toLocaleString();
+    if (statTotalEngagements) {
+      const totalEng = (data.totalLikes || 0) + (data.totalComments || 0) + (data.totalShares || 0);
+      statTotalEngagements.textContent = totalEng.toLocaleString();
+      statTotalEngagements.title = `Chi tiết: ❤️ ${ (data.totalLikes || 0).toLocaleString() } Thích | 💬 ${ (data.totalComments || 0).toLocaleString() } Bình luận | 🔁 ${ (data.totalShares || 0).toLocaleString() } Chia sẻ`;
+    }
     statPublishersCount.textContent = (data.publisherCount || 0).toLocaleString();
 
     tabPostsCount.textContent = data.totalPosts || 0;
     tabPubsCount.textContent = data.publisherCount || 0;
 
+    populatePublisherFilterDropdown(data.publishers || []);
     renderPublisherTable(data.publishers || []);
   } catch (err) {
     console.error('Lỗi khi tải thống kê:', err);
   }
+}
+
+/**
+ * Điền danh sách người đăng vào dropdown bộ lọc của bảng bài viết
+ */
+function populatePublisherFilterDropdown(publishers) {
+  if (!filterPublisherSelect) return;
+  const currentVal = state.publisher;
+  filterPublisherSelect.innerHTML = '<option value="">Tất cả người đăng</option>';
+  publishers.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.publisher_name;
+    opt.textContent = `${p.publisher_name} (${p.count})`;
+    if (p.publisher_name === currentVal) opt.selected = true;
+    filterPublisherSelect.appendChild(opt);
+  });
 }
 
 /**
@@ -499,6 +534,7 @@ function applyPublisherFilter(name) {
   activeFilterNotice.style.display = 'flex';
   currentFilterPublisherName.textContent = name;
   btnClearPublisherFilter.style.display = 'inline-block';
+  if (filterPublisherSelect) filterPublisherSelect.value = name;
   updateExportLinks();
   fetchPosts();
 }
@@ -508,6 +544,7 @@ function clearPublisherFilter() {
   state.page = 1;
   activeFilterNotice.style.display = 'none';
   btnClearPublisherFilter.style.display = 'none';
+  if (filterPublisherSelect) filterPublisherSelect.value = '';
   updateExportLinks();
   fetchPosts();
   fetchStats();
@@ -515,6 +552,32 @@ function clearPublisherFilter() {
 
 btnRemovePubFilter.addEventListener('click', clearPublisherFilter);
 btnClearPublisherFilter.addEventListener('click', clearPublisherFilter);
+
+/**
+ * Cập nhật giao diện mũi tên chỉ báo sắp xếp cột
+ */
+function updateSortIndicators() {
+  const indicatorCreated = document.getElementById('sortIndicator-created_time');
+  if (indicatorCreated) {
+    if (state.sortBy === 'created_time') {
+      indicatorCreated.textContent = state.sortOrder === 'ASC' ? '▲' : '▼';
+      indicatorCreated.style.opacity = '1';
+    } else {
+      indicatorCreated.textContent = '⬍';
+      indicatorCreated.style.opacity = '0.4';
+    }
+  }
+
+  // Cập nhật trạng thái active của các nút sort tương tác
+  document.querySelectorAll('.btn-sort-metric').forEach(btn => {
+    if (btn.dataset.sort === state.sortBy) {
+      btn.classList.add('active');
+      btn.title = `Đang sắp xếp: ${btn.dataset.sort === 'likes_count' ? 'Lượt Thích' : btn.dataset.sort === 'comments_count' ? 'Bình luận' : 'Chia sẻ'} (${state.sortOrder === 'ASC' ? 'Tăng dần ▲' : 'Giảm dần ▼'})`;
+    } else {
+      btn.classList.remove('active');
+    }
+  });
+}
 
 /**
  * Lấy danh sách bài viết cho View 2
@@ -537,11 +600,14 @@ async function fetchPosts() {
   if (state.until) params.set('until', state.until);
   if (state.publisher) params.set('publisher', state.publisher);
   if (state.status !== 'ALL') params.set('status', state.status);
+  if (state.postType && state.postType !== 'ALL') params.set('postType', state.postType);
   if (state.search) params.set('search', state.search);
+  if (state.sortBy) params.set('sortBy', state.sortBy);
+  if (state.sortOrder) params.set('sortOrder', state.sortOrder);
 
   postsTableBody.innerHTML = `
     <tr>
-      <td colspan="6" class="empty-cell">
+      <td colspan="7" class="empty-cell">
         <div class="spinner" style="margin: 0.5rem auto;"></div>
         Đang tải bài viết...
       </td>
@@ -558,7 +624,7 @@ async function fetchPosts() {
   } catch (err) {
     postsTableBody.innerHTML = `
       <tr>
-        <td colspan="6" class="empty-cell text-danger">Lỗi khi tải bài viết: ${escapeHtml(err.message)}</td>
+        <td colspan="7" class="empty-cell text-danger">Lỗi khi tải bài viết: ${escapeHtml(err.message)}</td>
       </tr>
     `;
   }
@@ -570,7 +636,7 @@ function renderPostsTable(items) {
   if (items.length === 0) {
     postsTableBody.innerHTML = `
       <tr>
-        <td colspan="6" class="empty-cell">Không tìm thấy bài viết nào phù hợp.</td>
+        <td colspan="7" class="empty-cell">Không tìm thấy bài viết nào phù hợp.</td>
       </tr>
     `;
     return;
@@ -590,6 +656,12 @@ function renderPostsTable(items) {
       statusBadge = `<span class="badge badge-danger">${escapeHtml(p.publisher_status)}</span>`;
     }
 
+    // Badge Loại bài viết
+    const isShared = p.post_type === 'SHARED';
+    const postTypeBadge = isShared
+      ? `<span class="badge badge-shared" title="Bài chia sẻ lại từ nguồn khác">🔄 Chia sẻ</span>`
+      : `<span class="badge badge-original" title="Bài viết tự đăng">📝 Tự đăng</span>`;
+
     let publisherHtml = '<span class="text-muted">Chưa xác định</span>';
     if (p.publisher_status === 'FOUND' && p.publisher_name) {
       if (p.publisher_profile_url) {
@@ -602,15 +674,24 @@ function renderPostsTable(items) {
     const formattedDate = formatVnDateDisplay(p.created_time);
     const messagePreview = p.message ? escapeHtml(truncateText(p.message, 120)) : '<em class="text-dim">Không có nội dung chữ</em>';
 
+    const likesCount = p.likes_count || 0;
+    const commentsCount = p.comments_count || 0;
+    const sharesCount = p.shares_count || 0;
+
+    const interactionsHtml = `
+      <div class="interactions-cell">
+        <span class="stat-pill pill-like" title="${likesCount.toLocaleString()} lượt Thích / Cảm xúc">❤️ ${likesCount.toLocaleString()}</span>
+        <span class="stat-pill pill-comment" title="${commentsCount.toLocaleString()} Bình luận">💬 ${commentsCount.toLocaleString()}</span>
+        <span class="stat-pill pill-share" title="${sharesCount.toLocaleString()} Chia sẻ">🔁 ${sharesCount.toLocaleString()}</span>
+      </div>
+    `;
+
     tr.innerHTML = `
       <td style="white-space: nowrap; font-size: 0.85rem; color: var(--text-dim);">${formattedDate}</td>
+      <td style="text-align: center;">${postTypeBadge}</td>
       <td>${publisherHtml}</td>
       <td title="${escapeHtml(p.message || '')}">${messagePreview}</td>
-      <td style="text-align: center; white-space: nowrap;">
-        <span class="interaction-pill" title="Lượt thích">❤️ ${p.likes_count || 0}</span>
-        <span class="interaction-pill" title="Bình luận">💬 ${p.comments_count || 0}</span>
-        <span class="interaction-pill" title="Chia sẻ">🔁 ${p.shares_count || 0}</span>
-      </td>
+      <td style="text-align: center; white-space: nowrap;">${interactionsHtml}</td>
       <td style="text-align: center;">${statusBadge}</td>
       <td style="text-align: center;">
         <a href="${escapeHtml(p.permalink_url)}" target="_blank" class="btn btn-xs btn-outline" title="Mở trên Facebook">🔗</a>
@@ -659,6 +740,67 @@ filterStatus.addEventListener('change', (e) => {
   state.page = 1;
   updateExportLinks();
   fetchPosts();
+});
+
+if (filterPostType) {
+  filterPostType.addEventListener('change', (e) => {
+    state.postType = e.target.value;
+    state.page = 1;
+    updateExportLinks();
+    fetchPosts();
+  });
+}
+
+if (filterPublisherSelect) {
+  filterPublisherSelect.addEventListener('change', (e) => {
+    state.publisher = e.target.value;
+    state.page = 1;
+    if (state.publisher) {
+      activeFilterNotice.style.display = 'flex';
+      currentFilterPublisherName.textContent = state.publisher;
+      btnClearPublisherFilter.style.display = 'inline-block';
+    } else {
+      activeFilterNotice.style.display = 'none';
+      btnClearPublisherFilter.style.display = 'none';
+    }
+    updateExportLinks();
+    fetchPosts();
+  });
+}
+
+// Sắp xếp cột Ngày đăng
+const colSortCreated = document.querySelector('.col-sortable[data-sort="created_time"]');
+if (colSortCreated) {
+  colSortCreated.addEventListener('click', () => {
+    if (state.sortBy === 'created_time') {
+      state.sortOrder = state.sortOrder === 'DESC' ? 'ASC' : 'DESC';
+    } else {
+      state.sortBy = 'created_time';
+      state.sortOrder = 'DESC';
+    }
+    updateSortIndicators();
+    state.page = 1;
+    updateExportLinks();
+    fetchPosts();
+  });
+}
+
+// Sắp xếp theo các chỉ số tương tác (Likes, Comments, Shares)
+document.querySelectorAll('.btn-sort-metric').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const targetSort = btn.dataset.sort;
+    if (state.sortBy === targetSort) {
+      state.sortOrder = state.sortOrder === 'DESC' ? 'ASC' : 'DESC';
+    } else {
+      state.sortBy = targetSort;
+      state.sortOrder = 'DESC';
+    }
+    updateSortIndicators();
+    state.page = 1;
+    updateExportLinks();
+    fetchPosts();
+  });
 });
 
 btnRefreshList.addEventListener('click', () => {
@@ -1025,6 +1167,7 @@ function escapeHtml(str) {
 window.addEventListener('DOMContentLoaded', () => {
   initDefaultDates();
   checkConfigStatus();
+  updateSortIndicators();
   fetchStats();
   fetchBatches(); // Tải danh sách các đợt đồng bộ bài viết (Mặc định không hiển thị bài viết dàn trải)
 

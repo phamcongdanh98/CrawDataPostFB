@@ -50,7 +50,7 @@ async function fetchPagePosts(sinceDate, untilDate, options = {}) {
   const initialUrl = new URL(`https://graph.facebook.com/${version}/${pageId}/posts`);
   initialUrl.searchParams.set(
     'fields',
-    'id,message,created_time,permalink_url,shares,reactions.summary(total_count).limit(0).as(reactions),comments.summary(total_count).limit(0).as(comments)'
+    'id,message,created_time,permalink_url,shares,status_type,parent_id,reactions.summary(total_count).limit(0).as(reactions),comments.summary(total_count).limit(0).as(comments)'
   );
   initialUrl.searchParams.set('limit', '100');
   initialUrl.searchParams.set('since', String(sinceTimestamp));
@@ -89,9 +89,9 @@ async function fetchPagePosts(sinceDate, untilDate, options = {}) {
 
           // Nếu lỗi do thiếu quyền pages_read_user_content (Code 10), tự động fallback sang fields cơ bản
           if (errCode === 10 || errMsg.includes('pages_read_user_content')) {
-            console.warn(`[API] Token chưa có quyền 'pages_read_user_content'. Tự động chuyển sang fields cơ bản (lấy bài viết + shares)...`);
+            console.warn(`[API] Token chưa có quyền 'pages_read_user_content'. Tự động chuyển sang fields cơ bản (lấy bài viết + shares + type)...`);
             const fallbackUrl = new URL(nextUrl);
-            fallbackUrl.searchParams.set('fields', 'id,message,created_time,permalink_url,shares');
+            fallbackUrl.searchParams.set('fields', 'id,message,created_time,permalink_url,shares,status_type,parent_id');
             nextUrl = fallbackUrl.toString();
             const fbRes = await fetch(nextUrl, {
               method: 'GET',
@@ -137,6 +137,7 @@ async function fetchPagePosts(sinceDate, untilDate, options = {}) {
       const likesCount = p.reactions?.summary?.total_count ?? p.likes?.summary?.total_count ?? 0;
       const commentsCount = p.comments?.summary?.total_count ?? 0;
       const sharesCount = p.shares?.count ?? 0;
+      const postType = (p.parent_id || p.status_type === 'shared_story') ? 'SHARED' : 'ORIGINAL';
 
       allPosts.push({
         id: p.id,
@@ -146,7 +147,8 @@ async function fetchPagePosts(sinceDate, untilDate, options = {}) {
         permalink_url: p.permalink_url || `https://www.facebook.com/${p.id}`,
         likes_count: likesCount,
         comments_count: commentsCount,
-        shares_count: sharesCount
+        shares_count: sharesCount,
+        post_type: postType
       });
     }
 

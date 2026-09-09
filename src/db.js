@@ -30,6 +30,7 @@ function initSchema(db) {
       likes_count INTEGER DEFAULT 0,
       comments_count INTEGER DEFAULT 0,
       shares_count INTEGER DEFAULT 0,
+      post_type TEXT NOT NULL DEFAULT 'ORIGINAL',
       publisher_id TEXT,
       publisher_name TEXT,
       publisher_profile_url TEXT,
@@ -65,7 +66,9 @@ function initSchema(db) {
   try { db.exec(`ALTER TABLE posts ADD COLUMN likes_count INTEGER DEFAULT 0;`); } catch (e) {}
   try { db.exec(`ALTER TABLE posts ADD COLUMN comments_count INTEGER DEFAULT 0;`); } catch (e) {}
   try { db.exec(`ALTER TABLE posts ADD COLUMN shares_count INTEGER DEFAULT 0;`); } catch (e) {}
+  try { db.exec(`ALTER TABLE posts ADD COLUMN post_type TEXT DEFAULT 'ORIGINAL';`); } catch (e) {}
   try { db.exec(`ALTER TABLE posts ADD COLUMN sync_batch_id TEXT;`); } catch (e) {}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_posts_post_type ON posts(post_type);`); } catch (e) {}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_posts_sync_batch ON posts(sync_batch_id);`); } catch (e) {}
 
   // Gán đợt ban đầu cho các bài viết cũ chưa có sync_batch_id
@@ -116,6 +119,7 @@ function upsertPost(dbOrPost, postOrBatchId, maybeBatchId = null) {
   const likes = post.likes_count ?? 0;
   const comments = post.comments_count ?? 0;
   const shares = post.shares_count ?? 0;
+  const postType = post.post_type || 'ORIGINAL';
   const targetBatchId = batchId || (existing ? existing.sync_batch_id : null);
 
   if (!existing) {
@@ -123,11 +127,11 @@ function upsertPost(dbOrPost, postOrBatchId, maybeBatchId = null) {
     const stmt = db.prepare(`
       INSERT INTO posts (
         id, page_id, message, created_time, permalink_url,
-        likes_count, comments_count, shares_count,
+        likes_count, comments_count, shares_count, post_type,
         publisher_status, attempt_count, sync_batch_id, created_at, updated_at
       ) VALUES (
         @id, @page_id, @message, @created_time, @permalink_url,
-        @likes, @comments, @shares,
+        @likes, @comments, @shares, @postType,
         'PENDING', 0, @targetBatchId, @now, @now
       )
     `);
@@ -140,6 +144,7 @@ function upsertPost(dbOrPost, postOrBatchId, maybeBatchId = null) {
       likes,
       comments,
       shares,
+      postType,
       targetBatchId,
       now
     });
@@ -154,6 +159,7 @@ function upsertPost(dbOrPost, postOrBatchId, maybeBatchId = null) {
         likes_count = @likes,
         comments_count = @comments,
         shares_count = @shares,
+        post_type = COALESCE(@postType, post_type),
         sync_batch_id = COALESCE(@targetBatchId, sync_batch_id),
         updated_at = @now
       WHERE id = @id
@@ -166,6 +172,7 @@ function upsertPost(dbOrPost, postOrBatchId, maybeBatchId = null) {
       likes,
       comments,
       shares,
+      postType,
       targetBatchId,
       now
     });
@@ -194,7 +201,7 @@ function upsertPosts(posts, batchId = null) {
 }
 
 /**
- * Cập nhật kết quả trích xuất publisher cho 1 bài viết
+ * Cập nhật kết quả trích xuất publisher và tương tác cho 1 bài viết từ Playwright
  */
 function updatePublisherResult(id, result) {
   const db = getDb();
@@ -209,6 +216,10 @@ function updatePublisherResult(id, result) {
       publisher_raw_text = COALESCE(@publisher_raw_text, publisher_raw_text),
       publisher_method = COALESCE(@publisher_method, publisher_method),
       publisher_checked_at = @now,
+      likes_count = CASE WHEN @likes IS NOT NULL AND @likes >= 0 THEN @likes ELSE likes_count END,
+      comments_count = CASE WHEN @comments IS NOT NULL AND @comments >= 0 THEN @comments ELSE comments_count END,
+      shares_count = CASE WHEN @shares IS NOT NULL AND @shares >= 0 THEN @shares ELSE shares_count END,
+      post_type = COALESCE(@post_type, post_type),
       attempt_count = attempt_count + 1,
       last_error = @last_error,
       updated_at = @now
@@ -223,6 +234,10 @@ function updatePublisherResult(id, result) {
     publisher_profile_url: result.profileUrl || null,
     publisher_raw_text: result.rawText || null,
     publisher_method: result.method || null,
+    likes: (typeof result.likes === 'number' && !isNaN(result.likes)) ? result.likes : null,
+    comments: (typeof result.comments === 'number' && !isNaN(result.comments)) ? result.comments : null,
+    shares: (typeof result.shares === 'number' && !isNaN(result.shares)) ? result.shares : null,
+    post_type: result.postType || null,
     last_error: result.reason || result.error || null,
     now
   });
@@ -298,7 +313,10 @@ function getPosts(options = {}) {
     batchId,
     publisher,
     status,
+    postType,
     search,
+    sortBy = 'created_time',
+    sortOrder = 'DESC',
     page = 1,
     limit = 20
   } = options;
@@ -328,6 +346,10 @@ function getPosts(options = {}) {
     conditions.push(`publisher_status = @status`);
     params.status = status;
   }
+  if (postType && postType !== 'ALL') {
+    conditions.push(`post_type = @postType`);
+    params.postType = postType;
+  }
   if (search && search.trim()) {
     conditions.push(`(message LIKE @search OR id LIKE @search OR publisher_name LIKE @search)`);
     params.search = `%${search.trim()}%`;
@@ -346,10 +368,20 @@ function getPosts(options = {}) {
   params.limit = limitNum;
   params.offset = offset;
 
+  // Xác thực cột sắp xếp an toàn chống SQL injection
+  const allowedSortColumns = {
+    'created_time': 'created_time',
+    'likes_count': 'likes_count',
+    'comments_count': 'comments_count',
+    'shares_count': 'shares_count'
+  };
+  const sortCol = allowedSortColumns[sortBy] || 'created_time';
+  const orderDir = (sortOrder && String(sortOrder).toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
+
   const items = db.prepare(`
     SELECT * FROM posts
     ${whereClause}
-    ORDER BY created_time DESC
+    ORDER BY ${sortCol} ${orderDir}
     LIMIT @limit OFFSET @offset
   `).all(params);
 
@@ -367,7 +399,7 @@ function getPosts(options = {}) {
  */
 function getAllPostsForExport(options = {}) {
   const db = getDb();
-  const { since, until, batchId, publisher, status, search } = options;
+  const { since, until, batchId, publisher, status, postType, search, sortBy = 'created_time', sortOrder = 'DESC' } = options;
 
   const conditions = [];
   const params = {};
@@ -394,6 +426,10 @@ function getAllPostsForExport(options = {}) {
     conditions.push(`publisher_status = @status`);
     params.status = status;
   }
+  if (postType && postType !== 'ALL') {
+    conditions.push(`post_type = @postType`);
+    params.postType = postType;
+  }
   if (search && search.trim()) {
     conditions.push(`(message LIKE @search OR id LIKE @search OR publisher_name LIKE @search)`);
     params.search = `%${search.trim()}%`;
@@ -401,10 +437,19 @@ function getAllPostsForExport(options = {}) {
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
+  const allowedSortColumns = {
+    'created_time': 'created_time',
+    'likes_count': 'likes_count',
+    'comments_count': 'comments_count',
+    'shares_count': 'shares_count'
+  };
+  const sortCol = allowedSortColumns[sortBy] || 'created_time';
+  const orderDir = (sortOrder && String(sortOrder).toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
+
   return db.prepare(`
     SELECT * FROM posts
     ${whereClause}
-    ORDER BY created_time DESC
+    ORDER BY ${sortCol} ${orderDir}
   `).all(params);
 }
 
@@ -481,7 +526,12 @@ function getStats() {
       SUM(CASE WHEN publisher_status = 'FOUND' THEN 1 ELSE 0 END) as found,
       SUM(CASE WHEN publisher_status = 'PENDING' THEN 1 ELSE 0 END) as pending,
       SUM(CASE WHEN publisher_status = 'NOT_FOUND' THEN 1 ELSE 0 END) as notFound,
-      SUM(CASE WHEN publisher_status IN ('ERROR', 'POST_UNAVAILABLE', 'LOGIN_REQUIRED') THEN 1 ELSE 0 END) as errors
+      SUM(CASE WHEN publisher_status IN ('ERROR', 'POST_UNAVAILABLE', 'LOGIN_REQUIRED') THEN 1 ELSE 0 END) as errors,
+      SUM(CASE WHEN post_type = 'SHARED' THEN 1 ELSE 0 END) as sharedPosts,
+      SUM(CASE WHEN post_type != 'SHARED' OR post_type IS NULL THEN 1 ELSE 0 END) as originalPosts,
+      COALESCE(SUM(likes_count), 0) as totalLikes,
+      COALESCE(SUM(comments_count), 0) as totalComments,
+      COALESCE(SUM(shares_count), 0) as totalShares
     FROM posts
   `).get();
 
@@ -499,6 +549,12 @@ function getStats() {
     pending: counts.pending || 0,
     notFound: counts.notFound || 0,
     errors: counts.errors || 0,
+    originalPosts: counts.originalPosts || 0,
+    sharedPosts: counts.sharedPosts || 0,
+    totalLikes: counts.totalLikes || 0,
+    totalComments: counts.totalComments || 0,
+    totalShares: counts.totalShares || 0,
+    totalEngagements: (counts.totalLikes || 0) + (counts.totalComments || 0) + (counts.totalShares || 0),
     publisherCount: publishers.length,
     publishers
   };
