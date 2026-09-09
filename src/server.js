@@ -614,6 +614,40 @@ app.post('/api/test-post', async (req, res) => {
   }
 });
 
+/**
+ * 13. Quét lại riêng một bài viết bất kỳ trong DB (Single Post Rescan)
+ */
+app.post('/api/posts/:id/rescan', async (req, res) => {
+  const postId = req.params.id;
+  let context = null;
+  let page = null;
+  try {
+    const post = db.getPostById(postId);
+    if (!post) {
+      return res.status(404).json({ error: 'Không tìm thấy bài viết trong cơ sở dữ liệu.' });
+    }
+
+    const { processSinglePost } = require('./publisher-worker');
+    context = await getBrowserContext({ headless: config.FB_HEADLESS });
+    page = await context.newPage();
+
+    const result = await processSinglePost(page, post);
+    db.updatePublisherResult(post.id, result);
+    const updatedPost = db.getPostById(postId);
+
+    res.json({
+      success: true,
+      post: updatedPost,
+      result
+    });
+  } catch (err) {
+    res.status(500).json({ error: `Lỗi khi quét lại bài viết: ${err.message}` });
+  } finally {
+    if (page) await page.close().catch(() => {});
+    if (context) await closeBrowserContext();
+  }
+});
+
 let server = null;
 if (require.main === module) {
   server = app.listen(config.PORT, () => {

@@ -276,12 +276,15 @@ function getPendingPosts(optionsOrLimit = {}, legacyForce = false) {
   let until = null;
   let batchId = null;
 
+  let includeNotFound = false;
+
   if (typeof optionsOrLimit === 'number') {
     limit = optionsOrLimit;
     force = Boolean(legacyForce);
   } else if (typeof optionsOrLimit === 'object' && optionsOrLimit !== null) {
     limit = optionsOrLimit.limit || 10000;
     force = Boolean(optionsOrLimit.force);
+    includeNotFound = Boolean(optionsOrLimit.includeNotFound);
     since = optionsOrLimit.since || null;
     until = optionsOrLimit.until || null;
     batchId = optionsOrLimit.batchId || null;
@@ -291,7 +294,11 @@ function getPendingPosts(optionsOrLimit = {}, legacyForce = false) {
   const params = {};
 
   if (!force) {
-    conditions.push(`publisher_status = 'PENDING'`);
+    if (includeNotFound) {
+      conditions.push(`(publisher_status = 'PENDING' OR publisher_status = 'NOT_FOUND')`);
+    } else {
+      conditions.push(`publisher_status = 'PENDING'`);
+    }
   }
 
   if (batchId && batchId !== 'ALL') {
@@ -592,6 +599,11 @@ function clearAllPostsData() {
   });
   runTx();
   return { deletedPosts, deletedBatches };
+}
+
+function getPostById(id) {
+  const db = getDb();
+  return db.prepare('SELECT * FROM posts WHERE id = ?').get(id);
 }
 
 function closeDb() {

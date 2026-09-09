@@ -521,7 +521,7 @@ function updateStatsFilterBanner(isFiltering) {
   if (state.search && state.search.trim()) tags.push(`Từ khóa: "${state.search.trim()}"`);
   if (state.postType && state.postType !== 'ALL') tags.push(`Loại: ${state.postType === 'SHARED' ? 'Chia sẻ' : 'Tự đăng'}`);
   if (state.status && state.status !== 'ALL') {
-    const statusMap = { 'FOUND': 'Đã xác định', 'PENDING': 'Chờ quét', 'NOT_FOUND': 'Không công khai', 'ERROR': 'Lỗi' };
+    const statusMap = { 'FOUND': 'Đã xác định', 'PENDING': 'Chờ quét', 'NOT_FOUND': 'Chưa nhận diện', 'ERROR': 'Lỗi' };
     tags.push(`Trạng thái: ${statusMap[state.status] || state.status}`);
   }
   if (state.publisher) tags.push(`Người đăng: ${state.publisher}`);
@@ -744,7 +744,7 @@ function renderPostsTable(items) {
     } else if (p.publisher_status === 'PENDING') {
       statusBadge = `<span class="badge badge-warning" title="Đang chờ quét bằng Playwright">⏳ Chờ quét</span>`;
     } else if (p.publisher_status === 'NOT_FOUND') {
-      statusBadge = `<span class="badge badge-secondary" title="Không tìm thấy tên hoặc bài viết bảo mật">🔒 Không c.khai</span>`;
+      statusBadge = `<span class="badge badge-secondary" title="Chưa nhận diện được tên tác giả">❓ Chưa rõ</span>`;
     } else {
       statusBadge = `<span class="badge badge-danger" title="Lỗi khi truy cập bài viết">❌ ${escapeHtml(p.publisher_status)}</span>`;
     }
@@ -798,6 +798,9 @@ function renderPostsTable(items) {
       <td style="text-align: center; white-space: nowrap;">${interactionsHtml}</td>
       <td style="text-align: center;">${statusBadge}</td>
       <td style="text-align: center; white-space: nowrap;">
+        <button type="button" class="btn btn-xs btn-outline btn-rescan-post" data-id="${escapeHtml(p.id)}" title="Quét lại tác giả bài viết này" style="margin-right: 2px;">
+          🔄
+        </button>
         <button type="button" class="btn btn-xs btn-outline btn-view-detail" title="Xem chi tiết nội dung bài viết">
           🔍
         </button>
@@ -806,6 +809,40 @@ function renderPostsTable(items) {
         </a>
       </td>
     `;
+
+    // Sự kiện quét lại bài viết đơn lẻ
+    const btnRescan = tr.querySelector('.btn-rescan-post');
+    if (btnRescan) {
+      btnRescan.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        btnRescan.disabled = true;
+        btnRescan.innerHTML = '⏳';
+        btnRescan.title = 'Đang quét lại...';
+        showToast({ type: 'info', title: 'Đang quét lại...', message: 'Đang mở bài viết để tìm kiếm thông tin tác giả...' });
+        try {
+          const res = await fetch(`/api/posts/${encodeURIComponent(p.id)}/rescan`, { method: 'POST' });
+          const data = await res.json();
+          if (data.success && data.post) {
+            if (data.post.publisher_name) {
+              showToast({ type: 'success', title: 'Đã nhận diện!', message: `Tác giả: ${data.post.publisher_name}` });
+            } else {
+              showToast({ type: 'warning', title: 'Chưa phát hiện', message: 'Không tìm thấy tên người đăng trên trang bài viết.' });
+            }
+            fetchPosts();
+            fetchStats();
+            fetchPublishers();
+          } else {
+            showToast({ type: 'danger', title: 'Lỗi', message: data.error || 'Lỗi khi quét' });
+          }
+        } catch (err) {
+          showToast({ type: 'danger', title: 'Lỗi', message: err.message });
+        } finally {
+          btnRescan.disabled = false;
+          btnRescan.innerHTML = '🔄';
+          btnRescan.title = 'Quét lại tác giả bài viết này';
+        }
+      });
+    }
 
     // Sự kiện mở modal xem chi tiết
     const openDetail = () => openPostDetailModal(p);
@@ -1220,7 +1257,7 @@ function openPostDetailModal(post) {
     statusText = 'Đã xác định';
     statusClass = 'badge badge-success';
   } else if (post.publisher_status === 'NOT_FOUND') {
-    statusText = 'Không công khai';
+    statusText = 'Chưa nhận diện';
     statusClass = 'badge badge-secondary';
   } else if (post.publisher_status === 'ERROR') {
     statusText = 'Lỗi tải trang';
@@ -1291,10 +1328,16 @@ btnSyncPosts.addEventListener('click', async () => {
         showToast({ type: 'error', title: 'Lỗi đồng bộ bài viết', message: errMsg || 'Không thể lấy bài viết từ Facebook' });
       }
     } else {
-      showToast({ type: 'success', title: 'Thành công', message: data.message });
+      showToast({ type: 'success', title: 'Đã lấy xong bài viết', message: 'Hệ thống đang tự động nhận diện người đăng bài...' });
       fetchStats();
       fetchBatches();
       fetchPosts();
+      // Tự động chạy ngay tiến trình tìm người đăng bài bằng Playwright
+      setTimeout(() => {
+        if (!jobState.isRunning) {
+          btnDetectPublishers.click();
+        }
+      }, 600);
     }
   } catch (err) {
     showToast({ type: 'error', title: 'Lỗi mạng', message: err.message });

@@ -200,7 +200,7 @@ async function generateExcelReport(posts, options = {}) {
       statusBg = 'FFDCFCE7'; // Xanh lá nhạt
       statusColor = 'FF15803D';
     } else if (p.publisher_status === 'NOT_FOUND') {
-      statusText = 'Không công khai';
+      statusText = 'Chưa nhận diện';
       statusBg = 'FFF1F5F9'; // Xám nhạt
       statusColor = 'FF475569';
     } else if (p.publisher_status === 'LOGIN_REQUIRED') {

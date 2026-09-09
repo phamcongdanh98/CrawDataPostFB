@@ -143,14 +143,19 @@ async function detectPublisher(page, options = {}) {
   const pageName = options.pageName || null;
 
   try {
-    // Đợi giao diện Facebook hiển thị nút Thích/Reaction của bài viết (báo hiệu bài viết và thanh tương tác đã render)
+    // Đợi giao diện Facebook hiển thị nút Thích/Reaction HOẶC nhãn người đăng (tối đa 10s)
     try {
-      await page.waitForSelector('[aria-label="Thích"], [aria-label="Like"], [aria-label="Gỡ Thích"], [aria-label="Remove Like"]', { timeout: 6000 });
-      await sleep(400);
+      await page.waitForFunction(() => {
+        const bodyText = document.body ? document.body.innerText : '';
+        const hasPublisherLabel = /người đăng|được đăng bởi|đăng bởi|published by|posted by/i.test(bodyText);
+        const hasReactionBtn = !!document.querySelector('[aria-label="Thích"], [aria-label="Like"], [aria-label="Gỡ Thích"], [aria-label="Remove Like"]');
+        return hasPublisherLabel || hasReactionBtn;
+      }, { timeout: 10000 });
+      await sleep(350);
     } catch (e) {}
 
-    // Chạy hàm phát hiện trực tiếp trong context của trang ngay khi DOM tải xong
-    const evaluation = await page.evaluate((fanpageNameToExclude) => {
+    // Hàm đánh giá trích xuất trực tiếp trong context của trình duyệt
+    const evaluateInPage = (fanpageNameToExclude) => {
       function isExcludedName(text) {
         if (!text) return true;
         const lower = text.trim().toLowerCase();
@@ -438,7 +443,21 @@ async function detectPublisher(page, options = {}) {
         reason: 'Không tìm thấy vùng thông tin người đăng',
         metrics: metricsAndType
       };
-    }, pageName);
+    };
+
+    let evaluation = await page.evaluate(evaluateInPage, pageName);
+
+    // In-Page Retry: Nếu chưa tìm thấy và không phải lỗi phiên/lỗi bài, cuộn nhẹ 250px và đợi 1.2s rồi quét lại lần 2
+    if (evaluation.status !== 'FOUND' && evaluation.status !== 'LOGIN_REQUIRED' && evaluation.status !== 'POST_UNAVAILABLE') {
+      try {
+        await page.evaluate(() => window.scrollBy(0, 250));
+        await sleep(1200);
+        const retryEval = await page.evaluate(evaluateInPage, pageName);
+        if (retryEval && retryEval.status === 'FOUND') {
+          evaluation = retryEval;
+        }
+      } catch (e) {}
+    }
 
     const extractedMetrics = evaluation.metrics || {};
     const likes = typeof extractedMetrics.likes === 'number' ? extractedMetrics.likes : null;

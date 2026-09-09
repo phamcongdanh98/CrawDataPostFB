@@ -82,14 +82,19 @@ async function processSinglePost(pageOrContext, post) {
       page = pageOrContext;
     }
 
-    page.setDefaultTimeout(15000);
-    page.setDefaultNavigationTimeout(15000);
+    page.setDefaultTimeout(30000);
+    page.setDefaultNavigationTimeout(30000);
 
     const urls = getCandidateUrls(post);
 
     for (let i = 0; i < urls.length; i++) {
       const targetUrl = urls[i];
-      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      try {
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      } catch (gotoErr) {
+        console.warn(`[Publisher] Cảnh báo kết nối: ${gotoErr.message}. Tiếp tục trích xuất...`);
+        await sleep(1500);
+      }
 
       // Chạy detector trích xuất publisher
       result = await detectPublisher(page, {
@@ -102,7 +107,7 @@ async function processSinglePost(pageOrContext, post) {
 
       // Nếu còn URL dự phòng thì thử tiếp nhanh
       if (i < urls.length - 1) {
-        await sleep(200);
+        await sleep(300);
       }
     }
 
@@ -139,8 +144,9 @@ async function runPublisherWorker(options = {}) {
   const until = options.until || null;
   const batchId = options.batchId || null;
 
-  // Lấy các bài cần xử lý từ DB theo bộ lọc
-  const postsToProcess = db.getPendingPosts({ limit, force, since, until, batchId });
+  // Lấy các bài cần xử lý từ DB theo bộ lọc (mặc định lấy cả bài PENDING và bài NOT_FOUND chưa tìm thấy tác giả)
+  const includeNotFound = options.includeNotFound !== undefined ? Boolean(options.includeNotFound) : true;
+  const postsToProcess = db.getPendingPosts({ limit, force, since, until, batchId, includeNotFound });
 
   if (postsToProcess.length === 0) {
     console.log('[Worker] Không có bài viết nào cần xử lý.');
@@ -159,20 +165,28 @@ async function runPublisherWorker(options = {}) {
   try {
     context = await getBrowserContext({ headless: config.FB_HEADLESS });
 
-    // Kiểm tra ban đầu xem đã có session Facebook chưa
-    const testPage = await context.newPage();
-    try {
-      await testPage.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 20000 });
-      const initialLogin = await checkPageLogin(testPage);
-      if (!initialLogin.isLoggedIn) {
-        console.error('[Worker] CẢNH BÁO: Phiên Facebook chưa đăng nhập hoặc đã hết hạn.');
-        console.error('[Worker] Hãy chạy: npm run login');
-        jobState.error = 'Phiên Facebook đã hết hạn. Hãy chạy: npm run login';
-        jobState.lastStatus = 'LOGIN_REQUIRED';
-        return { ...jobState };
+    // Kiểm tra ban đầu xem đã có session Facebook chưa (ưu tiên đọc cookie c_user siêu tốc, không bị nghẽn mạng)
+    const cookies = await context.cookies();
+    const hasCUser = cookies.some(c => c.name === 'c_user');
+
+    if (!hasCUser) {
+      let testPage = null;
+      try {
+        testPage = await context.newPage();
+        await testPage.goto('https://www.facebook.com/', { waitUntil: 'commit', timeout: 10000 });
+        const initialLogin = await checkPageLogin(testPage);
+        if (!initialLogin.isLoggedIn) {
+          console.error('[Worker] CẢNH BÁO: Phiên Facebook chưa đăng nhập hoặc đã hết hạn.');
+          console.error('[Worker] Hãy chạy: npm run login');
+          jobState.error = 'Phiên Facebook đã hết hạn. Hãy chạy: npm run login';
+          jobState.lastStatus = 'LOGIN_REQUIRED';
+          return { ...jobState };
+        }
+      } catch (e) {
+        console.warn('[Worker] Cảnh báo kiểm tra trang chủ ban đầu:', e.message, 'Tiến hành xử lý trực tiếp bài viết...');
+      } finally {
+        if (testPage) await testPage.close().catch(() => {});
       }
-    } finally {
-      await testPage.close().catch(() => {});
     }
 
     // Thiết lập hàng đợi cho concurrency pool
@@ -183,8 +197,8 @@ async function runPublisherWorker(options = {}) {
       let workerPage = null;
       try {
         workerPage = await context.newPage();
-        workerPage.setDefaultTimeout(15000);
-        workerPage.setDefaultNavigationTimeout(15000);
+        workerPage.setDefaultTimeout(30000);
+        workerPage.setDefaultNavigationTimeout(30000);
 
         while (currentIndex < postsToProcess.length && !jobState.stopRequested) {
           const index = currentIndex++;
@@ -196,15 +210,18 @@ async function runPublisherWorker(options = {}) {
           let attempt = 0;
           let postResult = null;
 
-          while (attempt < config.FB_MAX_RETRIES && !postResult) {
+          while (attempt < config.FB_MAX_RETRIES) {
             attempt++;
             postResult = await processSinglePost(workerPage, post);
 
-            // Nếu lỗi tạm thời và chưa vượt max retries thì thử lại
-            if (postResult.status === 'ERROR' && attempt < config.FB_MAX_RETRIES) {
-              console.warn(`[Publisher] Bài ${post.id} gặp lỗi lần ${attempt}. Thử lại...`);
-              await sleep(500);
-              postResult = null;
+            if (postResult.status === 'FOUND' || postResult.status === 'LOGIN_REQUIRED' || postResult.status === 'POST_UNAVAILABLE') {
+              break;
+            }
+
+            // Nếu gặp NOT_FOUND hoặc ERROR và chưa hết số lần thử
+            if (attempt < config.FB_MAX_RETRIES) {
+              console.warn(`[Publisher] Bài ${post.id} chưa nhận diện được (lần ${attempt}/${config.FB_MAX_RETRIES}). Thử lại...`);
+              await sleep(800);
             }
           }
 

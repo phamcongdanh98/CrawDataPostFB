@@ -60,16 +60,16 @@ const config = {
     return true; // Mặc định chạy ẩn để tối ưu tốc độ và không làm phiền người dùng
   },
   get FB_CONCURRENCY() {
-    return Math.min(16, Math.max(1, parseInt(process.env.FB_CONCURRENCY, 10) || 10));
+    return Math.min(16, Math.max(1, parseInt(process.env.FB_CONCURRENCY, 10) || 4));
   },
   get FB_DELAY_MIN_MS() {
-    return Math.max(10, parseInt(process.env.FB_DELAY_MIN_MS, 10) || 50);
+    return Math.max(10, parseInt(process.env.FB_DELAY_MIN_MS, 10) || 200);
   },
   get FB_DELAY_MAX_MS() {
-    return Math.max(30, parseInt(process.env.FB_DELAY_MAX_MS, 10) || 150);
+    return Math.max(30, parseInt(process.env.FB_DELAY_MAX_MS, 10) || 500);
   },
   get FB_MAX_RETRIES() {
-    return Math.max(1, parseInt(process.env.FB_MAX_RETRIES, 10) || 2);
+    return Math.max(1, parseInt(process.env.FB_MAX_RETRIES, 10) || 3);
   },
   get TZ() {
     return process.env.TZ || 'Asia/Ho_Chi_Minh';
