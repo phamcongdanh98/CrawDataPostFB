@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const config = require('./config');
 const { sleep } = require('./utils');
+const { PUBLISHER_STATUS } = require('./constants');
 
 /**
  * Trích xuất Publisher ID và chuẩn hóa Profile URL
@@ -143,18 +144,19 @@ async function detectPublisher(page, options = {}) {
   const pageName = options.pageName || null;
 
   try {
-    // Đợi giao diện Facebook hiển thị nút Thích/Reaction HOẶC nhãn người đăng (tối đa 10s)
+    // Đợi giao diện Facebook hiển thị bài viết hoặc nhãn người đăng (tối đa 2.5s thay vì 10s để tối ưu tốc độ)
     try {
       await page.waitForFunction(() => {
-        const bodyText = document.body ? document.body.innerText : '';
-        const hasPublisherLabel = /người đăng|được đăng bởi|đăng bởi|published by|posted by/i.test(bodyText);
-        const hasReactionBtn = !!document.querySelector('[aria-label="Thích"], [aria-label="Like"], [aria-label="Gỡ Thích"], [aria-label="Remove Like"]');
-        return hasPublisherLabel || hasReactionBtn;
-      }, { timeout: 10000 });
-      await sleep(350);
+        const hasContainer = !!document.querySelector('div[role="article"], div[role="main"], div[role="feed"]');
+        const text = document.body ? (document.body.textContent || '') : '';
+        const hasPublisher = /người đăng|được đăng bởi|đăng bởi|published by|posted by/i.test(text);
+        const hasReaction = !!document.querySelector('[aria-label="Thích"], [aria-label="Like"], [aria-label="Gỡ Thích"], [aria-label="Remove Like"]');
+        return hasPublisher || (hasContainer && hasReaction);
+      }, { timeout: 2500 });
+      await sleep(50);
     } catch (e) {}
 
-    // Hàm đánh giá trích xuất trực tiếp trong context của trình duyệt
+    // Hàm đánh giá trích xuất trực tiếp trong context của trình duyệt (Zero-Layout-Thrashing)
     const evaluateInPage = (fanpageNameToExclude) => {
       function isExcludedName(text) {
         if (!text) return true;
@@ -168,8 +170,8 @@ async function detectPublisher(page, options = {}) {
         return black.some(b => lower.includes(b));
       }
 
-      // Đọc visible text một lần duy nhất để tối ưu hiệu năng layout
-      const bodyText = document.body ? document.body.innerText : '';
+      // Kiểm tra nhanh bằng textContent (siêu tốc < 0.1ms, không gây layout reflow)
+      const fullTextContent = document.body ? (document.body.textContent || '') : '';
 
       // 2.1 Kiểm tra trạng thái bài viết không khả dụng
       const unavailablePatterns = [
@@ -180,7 +182,7 @@ async function detectPublisher(page, options = {}) {
         'May have been removed'
       ];
       for (const p of unavailablePatterns) {
-        if (bodyText.includes(p)) {
+        if (fullTextContent.includes(p)) {
           return {
             status: 'POST_UNAVAILABLE',
             reason: `Bài viết không khả dụng hoặc đã bị xóa (${p})`
@@ -197,7 +199,7 @@ async function detectPublisher(page, options = {}) {
         };
       }
 
-      // 2.3 Trích xuất chỉ số tương tác (Likes/Reactions, Comments, Shares)
+      // 2.3 Trích xuất chỉ số tương tác (Likes/Reactions, Comments, Shares, PostType)
       function extractMetricsAndType() {
         let likes = 0;
         let comments = 0;
@@ -226,53 +228,112 @@ async function detectPublisher(page, options = {}) {
           return isNaN(parsed) ? 0 : parsed;
         }
 
-        // Bóc tách cô lập trong phạm vi nội dung chính (mainArea)
-        // Loại trừ tuyệt đối header bar, navigation bar, popup thông báo, và danh sách comment
-        const mainArea = document.querySelector('div[role="main"]') || document.body;
-        const candidateButtons = Array.from(mainArea.querySelectorAll('[role="button"]')).filter(b => {
-          if (b.closest('header, div[role="banner"], div[role="navigation"], [aria-label*="Thông báo"], [aria-label*="Notifications"]')) return false;
-          if (b.closest('[aria-label*="Bình luận dưới tên"], [aria-label*="Bình luận của"]')) return false;
-          return true;
+        // Lọc đúng modal bài viết, loại bỏ các popup thông báo hoặc chat
+        const validDialogs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter(d => {
+          const aria = (d.getAttribute('aria-label') || '').toLowerCase();
+          return !aria.includes('thông báo') && !aria.includes('notification') && !aria.includes('chat') && !aria.includes('tin nhắn');
         });
+        const postContainer = (validDialogs.length > 0 ? validDialogs[validDialogs.length - 1] : null) || document.querySelector('div[role="main"]') || document.body;
 
-        // 1. Tìm nút reaction/Thích của bài viết chính
-        const reactBtn = candidateButtons.find(b => {
+        // Phân loại bài viết (ORIGINAL hay SHARED)
+        const shareIndicators = [
+          'đã chia sẻ một bài viết',
+          'đã chia sẻ bài viết',
+          'đã chia sẻ liên kết',
+          'đã chia sẻ một kỷ niệm',
+          'shared a post',
+          'shared a link'
+        ];
+        const lowerContainerText = (postContainer.textContent || '').toLowerCase();
+        const isShared = shareIndicators.some(ind => lowerContainerText.includes(ind));
+        if (isShared) {
+          postType = 'SHARED';
+        }
+
+        // Lọc các nút tương tác an toàn
+        function scanInteractiveButtons(container) {
+          return Array.from(container.querySelectorAll('[role="button"], [aria-label]')).filter(b => {
+            if (b.closest('header, div[role="banner"], div[role="navigation"], [aria-label*="Thông báo"], [aria-label*="Notifications"], [aria-label*="Chat"]')) return false;
+            if (b.closest('[aria-label*="Bình luận dưới tên"], [aria-label*="Bình luận của"]')) return false;
+            return true;
+          });
+        }
+
+        const candidateButtons = scanInteractiveButtons(postContainer);
+
+        for (const b of candidateButtons) {
           const aria = (b.getAttribute('aria-label') || '').trim();
-          return /^(?:Thích|Gỡ Thích|Yêu thích|Gỡ Yêu thích|Thương thương|Haha|Wow|Buồn|Phẫn nộ|Like|Remove Like)$/i.test(aria);
-        });
+          const lowerAria = aria.toLowerCase();
+          const txt = (b.textContent || b.innerText || '').trim();
 
-        if (reactBtn) {
-          // Tìm thanh action bar (container chứa cụm 3 nút Thích, Bình luận, Chia sẻ)
-          let actionBar = reactBtn.parentElement;
-          for (let i = 0; i < 5; i++) {
-            if (actionBar && actionBar.children.length >= 3) break;
-            if (actionBar && actionBar.parentElement) actionBar = actionBar.parentElement;
+          // 1. Likes / Reactions / Thả tim / Cảm xúc
+          if (/^(?:thích|gỡ thích|yêu thích|gỡ yêu thích|thương thương|haha|wow|buồn|phẫn nộ|like|remove like)$/i.test(aria)) {
+            const c = parseCount(txt);
+            if (c > likes) likes = c;
+          } else if (
+            lowerAria.includes('cảm xúc') ||
+            lowerAria.includes('người khác') ||
+            lowerAria.includes('thích:') ||
+            lowerAria.includes('yêu thích:') ||
+            lowerAria.includes('others') ||
+            lowerAria.includes('all reactions') ||
+            lowerAria.includes('bày tỏ cảm xúc')
+          ) {
+            const c = parseCount(aria) || parseCount(txt);
+            if (c > likes) likes = c;
           }
 
-          if (actionBar) {
-            Array.from(actionBar.children).forEach(child => {
-              const btn = child.getAttribute('role') === 'button' ? child : child.querySelector('[role="button"]');
-              const target = btn || child;
-              const aria = (target.getAttribute('aria-label') || '').trim().toLowerCase();
-              const txt = (target.innerText || '').trim();
+          // 2. Comments / Bình luận
+          if (lowerAria.includes('bình luận') || lowerAria.includes('viết bình luận') || lowerAria.includes('comment')) {
+            const c = parseCount(txt) || parseCount(aria);
+            if (c > comments) comments = c;
+          }
 
-              if (/^(?:thích|gỡ thích|yêu thích|gỡ yêu thích|thương thương|haha|wow|buồn|phẫn nộ|like|remove like)$/i.test(aria)) {
-                likes = parseCount(txt);
-              } else if (aria.includes('bình luận') || aria.includes('viết bình luận') || aria.includes('comment')) {
-                comments = parseCount(txt);
-              } else if (aria.includes('chia sẻ') || aria.includes('gửi nội dung này') || aria.includes('share')) {
-                shares = parseCount(txt);
-              }
-            });
+          // 3. Shares / Chia sẻ
+          if (lowerAria.includes('chia sẻ') || lowerAria.includes('gửi nội dung này') || lowerAria.includes('share')) {
+            const c = parseCount(txt) || parseCount(aria);
+            if (c > shares) shares = c;
+          }
+        }
 
-            // Nếu nút Thích không hiển thị số trực tiếp (Facebook hiển thị số lượng ở dòng tổng hợp cảm xúc phía trên)
-            if (likes === 0 && actionBar.parentElement) {
-              const aboveArea = actionBar.parentElement;
-              const summaryReact = aboveArea.querySelector('[role="button"][aria-label*="cảm xúc"], [role="button"][aria-label*="người khác"], [role="button"][aria-label*="thích:"]');
-              if (summaryReact) {
-                const parsed = parseCount(summaryReact.getAttribute('aria-label')) || parseCount(summaryReact.innerText);
-                if (parsed > 0) likes = parsed;
-              }
+        // Nếu chưa tìm thấy likes/reactions trong container, quét mở rộng toàn body (loại trừ header & popup)
+        if (likes === 0) {
+          const pageWideButtons = scanInteractiveButtons(document.body);
+          for (const b of pageWideButtons) {
+            const aria = (b.getAttribute('aria-label') || '').trim();
+            const lowerAria = aria.toLowerCase();
+            const txt = (b.textContent || b.innerText || '').trim();
+            if (/^(?:thích|gỡ thích|yêu thích|gỡ yêu thích|thương thương|haha|wow|buồn|phẫn nộ|like|remove like)$/i.test(aria)) {
+              const c = parseCount(txt);
+              if (c > likes) likes = c;
+            } else if (
+              lowerAria.includes('cảm xúc') ||
+              lowerAria.includes('người khác') ||
+              lowerAria.includes('thích:') ||
+              lowerAria.includes('yêu thích:') ||
+              lowerAria.includes('others') ||
+              lowerAria.includes('all reactions')
+            ) {
+              const c = parseCount(aria) || parseCount(txt);
+              if (c > likes) likes = c;
+            }
+          }
+        }
+
+        // Fallback: Quét các span văn bản tóm tắt số bình luận / chia sẻ nếu chưa có
+        if (comments === 0 || shares === 0) {
+          const textElements = Array.from(postContainer.querySelectorAll('span, div')).filter(el => el.children.length === 0);
+          for (const el of textElements) {
+            const t = (el.textContent || '').trim();
+            if (!t) continue;
+            const lower = t.toLowerCase();
+            if (comments === 0 && (lower.includes('bình luận') || lower.includes('comment'))) {
+              const c = parseCount(t);
+              if (c > 0) comments = c;
+            }
+            if (shares === 0 && (lower.includes('chia sẻ') || lower.includes('lượt chia sẻ') || lower.includes('share'))) {
+              const c = parseCount(t);
+              if (c > 0) shares = c;
             }
           }
         }
@@ -282,7 +343,7 @@ async function detectPublisher(page, options = {}) {
 
       const metricsAndType = extractMetricsAndType();
 
-      // 2.4 Các cụm từ khóa nhận diện người đăng
+      // Kiểm tra nhanh: Nếu trang hoàn toàn không có bất kỳ từ khóa publisher nào, kết thúc ngay trong < 0.1ms!
       const labelKeywords = [
         'người đăng:',
         'người đăng',
@@ -295,105 +356,98 @@ async function detectPublisher(page, options = {}) {
         'posted by:',
         'posted by'
       ];
+      const hasAnyLabel = /(?:người đăng|được đăng bởi|đăng bởi|published by|posted by)/i.test(fullTextContent);
+      if (!hasAnyLabel) {
+        return {
+          status: 'NOT_FOUND',
+          reason: 'Không tìm thấy nhãn người đăng trong nội dung trang',
+          metrics: metricsAndType
+        };
+      }
 
-      // Ưu tiên container bài viết: nếu có modal dialog (role="dialog") thì quét dialog trước,
-      // sau đó đến role="main", role="article", cuối cùng là toàn bộ document.body
+      // ==========================================
+      // STRATEGY 1: TreeWalker trích xuất qua TextNodes cực nhanh (0.5ms, ZERO layout reflow)
+      // ==========================================
       const searchRoots = [];
-      const dialog = document.querySelector('div[role="dialog"]');
-      if (dialog) searchRoots.push(dialog);
-
+      const validDialogs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter(d => {
+        const aria = (d.getAttribute('aria-label') || '').toLowerCase();
+        return !aria.includes('thông báo') && !aria.includes('notification') && !aria.includes('chat') && !aria.includes('tin nhắn');
+      });
+      if (validDialogs.length > 0) searchRoots.push(validDialogs[validDialogs.length - 1]);
       const article = document.querySelector('div[role="article"]');
       if (article && !searchRoots.includes(article)) searchRoots.push(article);
-
       const main = document.querySelector('div[role="main"]');
       if (main && !searchRoots.includes(main)) searchRoots.push(main);
-
       searchRoots.push(document.body);
 
       for (const root of searchRoots) {
         if (!root) continue;
 
-        // ==========================================
-        // STRATEGY 1: Quét các element có text chứa nhãn (ưu tiên thẻ nhỏ nhất, gần nhất)
-        // ==========================================
-        const allElements = Array.from(root.querySelectorAll('div, span, p, a, strong, b'));
-        const candidates = [];
-        for (const el of allElements) {
-          const rawText = (el.innerText || '').normalize('NFC').replace(/[\u034f\u200b-\u200f\u202a-\u202e\ufeff]/g, '').trim();
-          if (!rawText) continue;
-          const lower = rawText.toLowerCase();
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        let textNode;
+        while ((textNode = walker.nextNode())) {
+          const rawVal = (textNode.nodeValue || '').normalize('NFC').replace(/[\u034f\u200b-\u200f\u202a-\u202e\ufeff]/g, '').trim();
+          if (!rawVal) continue;
+          const lowerVal = rawVal.toLowerCase();
 
           for (const kw of labelKeywords) {
-            if (lower.includes(kw)) {
-              candidates.push({ el, text: rawText, lower, kw });
-              break;
-            }
-          }
-        }
+            if (lowerVal.includes(kw)) {
+              const el = textNode.parentElement;
+              if (!el) continue;
 
-        // Sắp xếp tăng dần theo độ dài text để xử lý thẻ con sâu nhất trước
-        candidates.sort((a, b) => a.text.length - b.text.length);
-
-        for (const { el, text, lower, kw } of candidates) {
-          // 1.1 Tách text trực tiếp sau từ khóa (chính xác nhất khi đã ở element nhỏ nhất)
-          const cleanAfterKw = text.substring(lower.indexOf(kw) + kw.length).trim();
-          if (cleanAfterKw) {
-            const firstLine = cleanAfterKw.split(/[\n\r·•]/)[0].replace(/[\?？\uFFFD\s]+$/, '').trim();
-            if (firstLine.length >= 2 && firstLine.length <= 60 && !isExcludedName(firstLine)) {
-              const elAnchors = Array.from(el.querySelectorAll('a'));
-              let matchingAnchor = elAnchors.find(a => (a.innerText || '').trim() === firstLine);
-              if (!matchingAnchor && el.nextElementSibling) {
-                const nextA = el.nextElementSibling.tagName === 'A' ? el.nextElementSibling : el.nextElementSibling.querySelector('a');
-                if (nextA && ((nextA.innerText || '').trim() === firstLine || !elAnchors.length)) {
-                  matchingAnchor = nextA;
+              // 1.1 Kiểm tra text phía sau keyword ngay trên textNode hoặc element
+              const cleanAfterKw = rawVal.substring(lowerVal.indexOf(kw) + kw.length).trim();
+              if (cleanAfterKw) {
+                const firstLine = cleanAfterKw.split(/[\n\r·•]/)[0].replace(/[\?？\uFFFD\s]+$/, '').trim();
+                if (firstLine.length >= 2 && firstLine.length <= 60 && !isExcludedName(firstLine)) {
+                  let matchingAnchor = el.querySelector ? el.querySelector('a') : null;
+                  if (!matchingAnchor && el.nextElementSibling) {
+                    matchingAnchor = el.nextElementSibling.tagName === 'A' ? el.nextElementSibling : el.nextElementSibling.querySelector('a');
+                  }
+                  return {
+                    status: 'FOUND',
+                    name: firstLine,
+                    href: matchingAnchor ? matchingAnchor.href : null,
+                    rawText: rawVal.substring(0, 100),
+                    method: matchingAnchor ? 'published-by-matched-anchor' : 'published-by-fast-text',
+                    metrics: metricsAndType
+                  };
                 }
               }
-              if (!matchingAnchor) {
-                matchingAnchor = Array.from(root.querySelectorAll('a')).find(a => (a.innerText || '').trim() === firstLine);
+
+              // 1.2 Kiểm tra thẻ <a> lân cận
+              const directAnchor = el.closest ? (el.tagName === 'A' ? el : el.querySelector('a')) : null;
+              if (directAnchor) {
+                const aText = (directAnchor.textContent || directAnchor.innerText || '').trim();
+                if (aText.length >= 2 && aText.length <= 60 && !isExcludedName(aText)) {
+                  return {
+                    status: 'FOUND',
+                    name: aText,
+                    href: directAnchor.href,
+                    rawText: rawVal.substring(0, 100),
+                    method: 'published-by-treewalker-anchor',
+                    metrics: metricsAndType
+                  };
+                }
               }
 
-              return {
-                status: 'FOUND',
-                name: firstLine,
-                href: matchingAnchor ? matchingAnchor.href : null,
-                rawText: text.substring(0, 100),
-                method: matchingAnchor ? 'published-by-name-matched-anchor' : 'published-by-text-split',
-                metrics: metricsAndType
-              };
-            }
-          }
-
-          // 1.2 Kiểm tra xem bên trong el có thẻ <a> không
-          const anchor = el.querySelector('a');
-          if (anchor) {
-            const aText = (anchor.innerText || '').trim();
-            if (aText.length >= 2 && aText.length <= 60 && !isExcludedName(aText)) {
-              return {
-                status: 'FOUND',
-                name: aText,
-                href: anchor.href,
-                rawText: text.substring(0, 100),
-                method: 'published-by-inner-anchor',
-                metrics: metricsAndType
-              };
-            }
-          }
-
-          // 1.3 Xét sibling tiếp theo
-          let next = el.nextElementSibling;
-          if (next) {
-            const nextAnchor = next.tagName === 'A' ? next : next.querySelector('a');
-            const nextText = ((nextAnchor ? nextAnchor.innerText : next.innerText) || '').trim();
-            const cleanNextText = nextText.split(/[\n\r·•]/)[0].replace(/[\?？\uFFFD\s]+$/, '').trim();
-            if (cleanNextText.length >= 2 && cleanNextText.length <= 60 && !isExcludedName(cleanNextText)) {
-              return {
-                status: 'FOUND',
-                name: cleanNextText,
-                href: nextAnchor ? nextAnchor.href : null,
-                rawText: `${text} ${cleanNextText}`,
-                method: 'published-by-sibling-anchor',
-                metrics: metricsAndType
-              };
+              // 1.3 Kiểm tra sibling tiếp theo của thẻ chứa nhãn
+              let nextEl = el.nextElementSibling;
+              if (nextEl) {
+                const nextAnchor = nextEl.tagName === 'A' ? nextEl : (nextEl.querySelector ? nextEl.querySelector('a') : null);
+                const nextText = ((nextAnchor ? nextAnchor.textContent : nextEl.textContent) || '').trim();
+                const cleanNextText = nextText.split(/[\n\r·•]/)[0].replace(/[\?？\uFFFD\s]+$/, '').trim();
+                if (cleanNextText.length >= 2 && cleanNextText.length <= 60 && !isExcludedName(cleanNextText)) {
+                  return {
+                    status: 'FOUND',
+                    name: cleanNextText,
+                    href: nextAnchor ? nextAnchor.href : null,
+                    rawText: `${rawVal} ${cleanNextText}`,
+                    method: 'published-by-treewalker-sibling',
+                    metrics: metricsAndType
+                  };
+                }
+              }
             }
           }
         }
@@ -420,10 +474,10 @@ async function detectPublisher(page, options = {}) {
       }
 
       // ==========================================
-      // STRATEGY 3: Fallback Regex trên toàn bộ visible text
+      // STRATEGY 3: Fallback Regex trên fullTextContent
       // ==========================================
       const fallbackRegex = /(?:Người đăng|Được đăng bởi|Đăng bởi|Published by|Posted by)[:\s]+([^·•\n\r|]{2,60})/i;
-      const match = bodyText.match(fallbackRegex);
+      const match = fullTextContent.match(fallbackRegex);
       if (match && match[1]) {
         const candidate = match[1].trim();
         if (candidate.length >= 2 && !isExcludedName(candidate)) {
@@ -447,11 +501,11 @@ async function detectPublisher(page, options = {}) {
 
     let evaluation = await page.evaluate(evaluateInPage, pageName);
 
-    // In-Page Retry: Nếu chưa tìm thấy và không phải lỗi phiên/lỗi bài, cuộn nhẹ 250px và đợi 1.2s rồi quét lại lần 2
+    // In-Page Retry: Nếu chưa tìm thấy và không phải lỗi phiên/lỗi bài, cuộn nhẹ 250px và quét lại
     if (evaluation.status !== 'FOUND' && evaluation.status !== 'LOGIN_REQUIRED' && evaluation.status !== 'POST_UNAVAILABLE') {
       try {
         await page.evaluate(() => window.scrollBy(0, 250));
-        await sleep(1200);
+        await sleep(250);
         const retryEval = await page.evaluate(evaluateInPage, pageName);
         if (retryEval && retryEval.status === 'FOUND') {
           evaluation = retryEval;

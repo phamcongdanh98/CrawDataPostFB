@@ -49,64 +49,40 @@ app.get('/api/config-status', (req, res) => {
 app.post('/api/settings', async (req, res) => {
   try {
     const { pageId, accessToken, concurrency, delayMinMs, delayMaxMs } = req.body;
-    const envPath = path.resolve(config.ROOT_DIR, '.env');
-    let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+    const updates = {};
 
     if (pageId) {
-      if (/FB_PAGE_ID=.*/.test(envContent)) {
-        envContent = envContent.replace(/FB_PAGE_ID=.*/g, `FB_PAGE_ID=${pageId.trim()}`);
-      } else {
-        envContent += `\nFB_PAGE_ID=${pageId.trim()}`;
-      }
+      updates.FB_PAGE_ID = pageId.trim();
     }
 
     if (accessToken) {
       let finalToken = accessToken.trim();
       // Thử tự động resolve page access token nếu người dùng dán user token
-      if (pageId) {
+      const targetPageId = (pageId || config.FB_PAGE_ID || '').trim();
+      if (targetPageId) {
         try {
-          const resolved = await resolvePageAccessToken(finalToken, pageId.trim(), config.FB_GRAPH_VERSION);
+          const resolved = await resolvePageAccessToken(finalToken, targetPageId, config.FB_GRAPH_VERSION);
           if (resolved.ok && resolved.token) {
             finalToken = resolved.token;
           }
         } catch (e) {}
       }
-      if (/FB_PAGE_ACCESS_TOKEN=.*/.test(envContent)) {
-        envContent = envContent.replace(/FB_PAGE_ACCESS_TOKEN=.*/g, `FB_PAGE_ACCESS_TOKEN=${finalToken}`);
-      } else {
-        envContent += `\nFB_PAGE_ACCESS_TOKEN=${finalToken}`;
-      }
+      updates.FB_PAGE_ACCESS_TOKEN = finalToken;
     }
 
     if (concurrency) {
-      const c = Math.min(16, Math.max(1, parseInt(concurrency, 10) || 10));
-      if (/FB_CONCURRENCY=.*/.test(envContent)) {
-        envContent = envContent.replace(/FB_CONCURRENCY=.*/g, `FB_CONCURRENCY=${c}`);
-      } else {
-        envContent += `\nFB_CONCURRENCY=${c}`;
-      }
+      updates.FB_CONCURRENCY = Math.min(16, Math.max(1, parseInt(concurrency, 10) || 10));
     }
 
     if (delayMinMs !== undefined) {
-      const dMin = Math.max(10, parseInt(delayMinMs, 10) || 50);
-      if (/FB_DELAY_MIN_MS=.*/.test(envContent)) {
-        envContent = envContent.replace(/FB_DELAY_MIN_MS=.*/g, `FB_DELAY_MIN_MS=${dMin}`);
-      } else {
-        envContent += `\nFB_DELAY_MIN_MS=${dMin}`;
-      }
+      updates.FB_DELAY_MIN_MS = Math.max(10, parseInt(delayMinMs, 10) || 50);
     }
 
     if (delayMaxMs !== undefined) {
-      const dMax = Math.max(30, parseInt(delayMaxMs, 10) || 150);
-      if (/FB_DELAY_MAX_MS=.*/.test(envContent)) {
-        envContent = envContent.replace(/FB_DELAY_MAX_MS=.*/g, `FB_DELAY_MAX_MS=${dMax}`);
-      } else {
-        envContent += `\nFB_DELAY_MAX_MS=${dMax}`;
-      }
+      updates.FB_DELAY_MAX_MS = Math.max(30, parseInt(delayMaxMs, 10) || 150);
     }
 
-    fs.writeFileSync(envPath, envContent.trim() + '\n', 'utf8');
-    config.reloadEnv();
+    config.updateEnvConfig(updates);
 
     res.json({
       success: true,
@@ -257,11 +233,11 @@ app.post('/api/clear-data', (req, res) => {
  */
 app.get('/api/stats', (req, res) => {
   try {
-    let { since, until, batchId, publisher, status, postType, search } = req.query;
+    let { since, until, batchId, publisher, status, postType, search, minLikes, minComments, minShares } = req.query;
     if (since) since = normalizeDateStr(since) || since;
     if (until) until = normalizeDateStr(until) || until;
 
-    const stats = db.getStats({ since, until, batchId, publisher, status, postType, search });
+    const stats = db.getStats({ since, until, batchId, publisher, status, postType, search, minLikes, minComments, minShares });
     res.json(stats);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -281,6 +257,22 @@ app.get('/api/publishers', (req, res) => {
 });
 
 /**
+ * 6.0 Bảng xếp hạng hiệu suất Người đăng (Leaderboard & KPI Analytics)
+ */
+app.get('/api/publisher-leaderboard', (req, res) => {
+  try {
+    let { since, until, batchId, postType, search } = req.query;
+    if (since) since = normalizeDateStr(since) || since;
+    if (until) until = normalizeDateStr(until) || until;
+
+    const leaderboard = db.getPublisherLeaderboard({ since, until, batchId, postType, search });
+    res.json(leaderboard);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
  * 6.1 Danh sách các đợt đồng bộ bài viết
  */
 app.get('/api/batches', (req, res) => {
@@ -293,11 +285,11 @@ app.get('/api/batches', (req, res) => {
 });
 
 /**
- * 7. Danh sách bài viết có phân trang và bộ lọc (hỗ trợ batchId, postType, sortBy, sortOrder)
+ * 7. Danh sách bài viết có phân trang và bộ lọc (hỗ trợ batchId, postType, sortBy, sortOrder, minLikes, minComments, minShares)
  */
 app.get('/api/posts', (req, res) => {
   try {
-    const { since, until, batchId, publisher, status, postType, search, sortBy, sortOrder, page = 1, limit = 20 } = req.query;
+    const { since, until, batchId, publisher, status, postType, search, sortBy, sortOrder, minLikes, minComments, minShares, page = 1, limit = 20 } = req.query;
     const result = db.getPosts({
       since,
       until,
@@ -308,6 +300,9 @@ app.get('/api/posts', (req, res) => {
       search,
       sortBy,
       sortOrder,
+      minLikes,
+      minComments,
+      minShares,
       page: parseInt(page, 10),
       limit: parseInt(limit, 10)
     });
@@ -318,15 +313,59 @@ app.get('/api/posts', (req, res) => {
 });
 
 /**
+ * 7.1 Lấy thông tin chi tiết một bài viết theo ID
+ */
+app.get('/api/posts/:id', (req, res) => {
+  try {
+    const post = db.getPostById(req.params.id);
+    if (!post) {
+      return res.status(404).json({ error: 'Không tìm thấy bài viết trong cơ sở dữ liệu.' });
+    }
+    res.json(post);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * 7.2 Quét lại hàng loạt bài viết theo danh sách ID (Batch Rescan)
+ */
+app.post('/api/posts/batch-rescan', (req, res) => {
+  const current = getJobState();
+  if (current.isRunning) {
+    return res.status(400).json({ error: 'Tiến trình tìm người đăng đang chạy. Vui lòng chờ.' });
+  }
+
+  const { postIds } = req.body;
+  if (!Array.isArray(postIds) || postIds.length === 0) {
+    return res.status(400).json({ error: 'Danh sách bài viết cần quét lại không hợp lệ hoặc để trống.' });
+  }
+
+  // Khởi chạy tìm người đăng ngầm cho tập postIds được chọn
+  detectPublishers({
+    postIds,
+    force: true
+  }).catch(err => {
+    console.error('[API] Lỗi trong batch-rescan:', err);
+  });
+
+  res.json({
+    success: true,
+    count: postIds.length,
+    message: `Đã bắt đầu quét lại ${postIds.length} bài viết đã chọn ở chế độ nền.`
+  });
+});
+
+/**
  * 8. Xuất dữ liệu CSV
  */
 app.get('/api/export.csv', (req, res) => {
   try {
-    let { since, until, batchId, publisher, status, postType, search, sortBy, sortOrder } = req.query;
+    let { since, until, batchId, publisher, status, postType, search, sortBy, sortOrder, minLikes, minComments, minShares } = req.query;
     if (since) since = normalizeDateStr(since) || since;
     if (until) until = normalizeDateStr(until) || until;
 
-    const posts = db.getAllPostsForExport({ since, until, batchId, publisher, status, postType, search, sortBy, sortOrder });
+    const posts = db.getAllPostsForExport({ since, until, batchId, publisher, status, postType, search, sortBy, sortOrder, minLikes, minComments, minShares });
 
     // UTF-8 BOM để Excel hiển thị đúng tiếng Việt
     let csv = '\uFEFF';
@@ -367,11 +406,11 @@ app.get('/api/export.csv', (req, res) => {
 app.get('/api/export.xlsx', async (req, res) => {
   try {
     const { generateExcelReport } = require('./excel-exporter');
-    let { since, until, batchId, publisher, status, postType, search, sortBy, sortOrder } = req.query;
+    let { since, until, batchId, publisher, status, postType, search, sortBy, sortOrder, minLikes, minComments, minShares } = req.query;
     if (since) since = normalizeDateStr(since) || since;
     if (until) until = normalizeDateStr(until) || until;
 
-    const filterObj = { since, until, batchId, publisher, status, postType, search, sortBy, sortOrder };
+    const filterObj = { since, until, batchId, publisher, status, postType, search, sortBy, sortOrder, minLikes, minComments, minShares };
     const posts = db.getAllPostsForExport(filterObj);
     const stats = db.getStats(filterObj);
 
@@ -467,20 +506,7 @@ app.post('/api/update-token', async (req, res) => {
       }
     }
 
-    const envPath = path.resolve(config.ROOT_DIR, '.env');
-    let envContent = '';
-    if (fs.existsSync(envPath)) {
-      envContent = fs.readFileSync(envPath, 'utf8');
-    }
-
-    if (envContent.includes('FB_PAGE_ACCESS_TOKEN=')) {
-      envContent = envContent.replace(/FB_PAGE_ACCESS_TOKEN=.*/g, `FB_PAGE_ACCESS_TOKEN=${finalToken}`);
-    } else {
-      envContent += `\nFB_PAGE_ACCESS_TOKEN=${finalToken}\n`;
-    }
-
-    fs.writeFileSync(envPath, envContent, 'utf8');
-    config.reloadEnv();
+    config.updateEnvConfig({ FB_PAGE_ACCESS_TOKEN: finalToken });
 
     res.json({
       success: true,
@@ -657,14 +683,22 @@ if (require.main === module) {
     console.log(`======================================================\n`);
   });
 
-  function shutdown() {
+  async function shutdown() {
     console.log('\n[Server] Đang tắt máy chủ...');
+    try {
+      await closeBrowserContext();
+      console.log('[Server] Đã giải phóng tài nguyên Chromium Playwright.');
+    } catch (e) {}
+
     if (server) {
       server.close(() => {
         db.closeDb();
         console.log('[Server] Đã đóng kết nối SQLite và dừng máy chủ.');
         process.exit(0);
       });
+    } else {
+      db.closeDb();
+      process.exit(0);
     }
   }
 

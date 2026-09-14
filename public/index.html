@@ -52,6 +52,9 @@
             </button>
           </div>
           <div class="btn-group-export">
+            <button id="btnCopySummaryReport" type="button" class="btn btn-outline" style="color: #60a5fa; border-color: rgba(96, 165, 250, 0.4);" title="Sao chép báo cáo tóm tắt KPI dạng văn bản / Markdown gửi Zalo, Telegram">
+              <span>📋 Báo cáo nhanh</span>
+            </button>
             <a id="btnExportExcel" href="/api/export.xlsx" class="btn btn-export-excel" download title="Tải file Excel hoàn chỉnh (.xlsx) chuẩn báo cáo">
               <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
               <span>Xuất Excel (.xlsx)</span>
@@ -360,9 +363,47 @@
             </select>
           </div>
 
+          <!-- Filter Like tối thiểu -->
+          <div class="filter-item">
+            <span class="filter-label">Min Like:</span>
+            <input type="number" id="filterMinLikes" placeholder="0" min="0" class="custom-input-number" style="width: 68px; padding: 0.38rem 0.5rem; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 0.85rem;" title="Lọc bài có ít nhất số lượt Thích này">
+          </div>
+
+          <!-- Sort Dropdown -->
+          <div class="filter-item">
+            <span class="filter-label">Sắp xếp:</span>
+            <select id="filterSortBy" class="custom-select" title="Tiêu chí sắp xếp danh sách bài viết">
+              <option value="created_time">🕒 Mới nhất</option>
+              <option value="total_engagements">⭐ Tổng tương tác</option>
+              <option value="likes_count">❤️ Lượt Thích</option>
+              <option value="comments_count">💬 Bình luận</option>
+              <option value="shares_count">🔁 Chia sẻ</option>
+            </select>
+          </div>
+
           <button id="btnRefreshList" class="btn btn-icon-refresh" title="Làm mới danh sách bài viết">
             <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
             <span>Làm mới</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Thanh thao tác hàng loạt (Batch Action Bar) -->
+      <div id="batchActionBar" class="batch-action-bar" style="display: none;">
+        <div class="batch-action-info">
+          <span class="batch-badge">⚡ Thao tác hàng loạt</span>
+          <span>Đã chọn <strong id="selectedPostsCount" style="color: #38bdf8;">0</strong> bài viết</span>
+        </div>
+        <div class="batch-action-btns">
+          <button type="button" id="btnBatchRescanSelected" class="btn btn-sm btn-primary">
+            <span id="batchRescanSpinner" class="spinner-sm" style="display: none;"></span>
+            <span>🔄 Quét lại bài đã chọn</span>
+          </button>
+          <button type="button" id="btnBatchRescanNotFound" class="btn btn-sm btn-outline-warning" title="Tự động quét lại toàn bộ các bài viết chưa nhận diện được người đăng trong cơ sở dữ liệu">
+            <span>❓ Quét tất cả bài NOT_FOUND</span>
+          </button>
+          <button type="button" id="btnClearSelectedPosts" class="btn btn-sm btn-secondary">
+            <span>Bỏ chọn</span>
           </button>
         </div>
       </div>
@@ -380,16 +421,19 @@
         <table class="data-table" id="postsTable">
           <thead>
             <tr>
+              <th style="width: 38px; text-align: center;">
+                <input type="checkbox" id="selectAllPosts" title="Chọn tất cả bài viết trên trang này" style="cursor: pointer; width: 16px; height: 16px;">
+              </th>
               <th style="width: 145px;" class="col-sortable" data-sort="created_time" title="Bấm để sắp xếp theo Ngày đăng">
                 <div class="th-sort-wrapper">
                   <span>Ngày đăng</span>
                   <span class="sort-indicator" id="sortIndicator-created_time">▼</span>
                 </div>
               </th>
-              <th style="width: 115px; text-align: center;">Loại bài</th>
-              <th style="width: 190px;">Người đăng bài</th>
+              <th style="width: 110px; text-align: center;">Loại bài</th>
+              <th style="width: 180px;">Người đăng bài</th>
               <th>Nội dung bài viết (Xem trước)</th>
-              <th style="width: 190px; text-align: center;">
+              <th style="width: 200px; text-align: center;">
                 <div class="th-interaction-title">
                   <span>Tương tác</span>
                   <div class="interaction-sort-buttons">
@@ -400,12 +444,12 @@
                 </div>
               </th>
               <th style="width: 135px; text-align: center;">Trạng thái</th>
-              <th style="width: 80px; text-align: center;">Chi tiết</th>
+              <th style="width: 110px; text-align: center;">Tác vụ</th>
             </tr>
           </thead>
           <tbody id="postsTableBody">
             <tr>
-              <td colspan="7" class="empty-cell">
+              <td colspan="8" class="empty-cell">
                 <div class="empty-state">
                   <span class="empty-icon">📭</span>
                   <h4>Đang tải dữ liệu bài viết...</h4>
@@ -439,26 +483,36 @@
     <section id="viewPublishers" class="panel publisher-panel" style="display: none;">
       <div class="panel-header">
         <div>
-          <h2>Bảng xếp hạng năng suất Quản trị viên & Người đăng</h2>
-          <p class="subtitle">Thống kê số lượng bài viết do từng cá nhân đăng tải trên Fanpage</p>
+          <h2>🏆 Bảng xếp hạng năng suất & Hiệu quả Người đăng (Leaderboard)</h2>
+          <p class="subtitle">Thống kê toàn diện số bài viết, tương tác Likes, Comments, Shares và trung bình hiệu quả của từng quản trị viên</p>
         </div>
-        <button id="btnClearPublisherFilter" class="btn btn-sm btn-outline" style="display: none;">Xem tất cả bài viết</button>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+          <button id="btnRefreshLeaderboard" class="btn btn-sm btn-outline">
+            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+            Làm mới BXH
+          </button>
+          <button id="btnClearPublisherFilter" class="btn btn-sm btn-outline" style="display: none;">Xem tất cả bài viết</button>
+        </div>
       </div>
 
       <div class="table-responsive">
         <table class="data-table" id="publisherTable">
           <thead>
             <tr>
-              <th style="width: 70px; text-align: center;">Thứ hạng</th>
+              <th style="width: 55px; text-align: center;">#</th>
               <th>Quản trị viên / Người đăng bài</th>
-              <th style="width: 220px; text-align: center;">Tỷ lệ đóng góp</th>
-              <th style="text-align: right; width: 140px;">Số bài đăng</th>
-              <th style="width: 170px; text-align: center;">Tác vụ</th>
+              <th style="width: 120px; text-align: center;">Tổng bài</th>
+              <th style="width: 90px; text-align: center;">❤️ Like</th>
+              <th style="width: 90px; text-align: center;">💬 Comment</th>
+              <th style="width: 90px; text-align: center;">🔁 Share</th>
+              <th style="width: 130px; text-align: center;" title="Tổng lượt tương tác (Like + Comment + Share)">⭐ Tổng tương tác</th>
+              <th style="width: 110px; text-align: center;" title="Tương tác trung bình mỗi bài viết">📊 TB / bài</th>
+              <th style="width: 110px; text-align: center;">Tác vụ</th>
             </tr>
           </thead>
           <tbody id="publisherTableBody">
             <tr>
-              <td colspan="5" class="empty-cell">Chưa có dữ liệu người đăng</td>
+              <td colspan="9" class="empty-cell">Chưa có dữ liệu người đăng</td>
             </tr>
           </tbody>
         </table>
@@ -535,8 +589,18 @@
           <span id="detailPostId" class="text-muted font-mono" style="font-size: 12px;">ID: -</span>
         </div>
       </div>
-      <div class="modal-footer">
-        <button id="btnDismissPostDetailModal" class="btn btn-secondary">Đóng</button>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; gap: 0.5rem;">
+          <button id="btnCopyPostLink" type="button" class="btn btn-sm btn-outline">🔗 Sao chép link</button>
+          <button id="btnCopyPostText" type="button" class="btn btn-sm btn-outline">📋 Sao chép nội dung</button>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+          <button id="btnRescanFromModal" type="button" class="btn btn-sm btn-primary">
+            <span id="rescanModalSpinner" class="spinner-sm" style="display: none;"></span>
+            <span>🔄 Quét lại bài này</span>
+          </button>
+          <button id="btnDismissPostDetailModal" class="btn btn-sm btn-secondary">Đóng</button>
+        </div>
       </div>
     </div>
   </div>
@@ -592,9 +656,10 @@
           <div class="control-group">
             <label for="settingSpeedMode" class="form-label">⏱️ Chế độ độ trễ nghỉ giữa các bài:</label>
             <select id="settingSpeedMode" class="select-full" style="padding: 0.55rem 0.75rem; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); width: 100%;">
-              <option value="turbo" selected>Siêu tốc (50ms - 150ms)</option>
-              <option value="balanced">Cân bằng (200ms - 500ms)</option>
-              <option value="safe">An toàn (1.0s - 2.5s)</option>
+              <option value="warp">🚀 Tên lửa (10ms - 50ms - Siêu tốc)</option>
+              <option value="turbo" selected>⚡ Nhanh (50ms - 150ms)</option>
+              <option value="balanced">⏱️ Cân bằng (200ms - 500ms)</option>
+              <option value="safe">🛡️ An toàn (1.0s - 2.5s)</option>
             </select>
             <small class="form-hint">Khoảng thời gian nghỉ giữa các bài viết.</small>
           </div>

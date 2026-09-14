@@ -89,11 +89,12 @@ async function processSinglePost(pageOrContext, post) {
 
     for (let i = 0; i < urls.length; i++) {
       const targetUrl = urls[i];
+      let pageLoaded = true;
       try {
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
       } catch (gotoErr) {
+        pageLoaded = false;
         console.warn(`[Publisher] Cảnh báo kết nối: ${gotoErr.message}. Tiếp tục trích xuất...`);
-        await sleep(1500);
       }
 
       // Chạy detector trích xuất publisher
@@ -101,13 +102,18 @@ async function processSinglePost(pageOrContext, post) {
         postId: post.id
       });
 
-      if (result.status === 'FOUND' || result.status === 'LOGIN_REQUIRED') {
+      if (result.status === 'FOUND' || result.status === 'LOGIN_REQUIRED' || result.status === 'POST_UNAVAILABLE') {
         break;
       }
 
-      // Nếu còn URL dự phòng thì thử tiếp nhanh
+      // Nếu URL chính đã load thành công và ra NOT_FOUND thì không cần load lại URL phụ
+      if (pageLoaded && result.status === 'NOT_FOUND') {
+        break;
+      }
+
+      // Nếu URL chính lỗi kết nối và còn URL dự phòng thì thử tiếp
       if (i < urls.length - 1) {
-        await sleep(300);
+        await sleep(200);
       }
     }
 
@@ -131,6 +137,7 @@ async function processSinglePost(pageOrContext, post) {
  * @param {Object} options
  * @param {boolean} options.force - quét lại cả bài đã xử lý
  * @param {number} options.limit - giới hạn số bài (nếu có)
+ * @param {Array<string>} options.postIds - danh sách bài viết cụ thể cần quét lại
  * @param {Function} options.onProgress - callback khi xong mỗi bài
  */
 async function runPublisherWorker(options = {}) {
@@ -143,10 +150,16 @@ async function runPublisherWorker(options = {}) {
   const since = options.since || null;
   const until = options.until || null;
   const batchId = options.batchId || null;
+  const specificPostIds = Array.isArray(options.postIds) && options.postIds.length > 0 ? options.postIds : null;
 
-  // Lấy các bài cần xử lý từ DB theo bộ lọc (mặc định lấy cả bài PENDING và bài NOT_FOUND chưa tìm thấy tác giả)
-  const includeNotFound = options.includeNotFound !== undefined ? Boolean(options.includeNotFound) : true;
-  const postsToProcess = db.getPendingPosts({ limit, force, since, until, batchId, includeNotFound });
+  // Lấy các bài cần xử lý từ DB
+  let postsToProcess = [];
+  if (specificPostIds) {
+    postsToProcess = db.getPostsByIds(specificPostIds);
+  } else {
+    const includeNotFound = options.includeNotFound !== undefined ? Boolean(options.includeNotFound) : true;
+    postsToProcess = db.getPendingPosts({ limit, force, since, until, batchId, includeNotFound });
+  }
 
   if (postsToProcess.length === 0) {
     console.log('[Worker] Không có bài viết nào cần xử lý.');
@@ -197,8 +210,8 @@ async function runPublisherWorker(options = {}) {
       let workerPage = null;
       try {
         workerPage = await context.newPage();
-        workerPage.setDefaultTimeout(30000);
-        workerPage.setDefaultNavigationTimeout(30000);
+        workerPage.setDefaultTimeout(25000);
+        workerPage.setDefaultNavigationTimeout(25000);
 
         while (currentIndex < postsToProcess.length && !jobState.stopRequested) {
           const index = currentIndex++;
@@ -214,14 +227,15 @@ async function runPublisherWorker(options = {}) {
             attempt++;
             postResult = await processSinglePost(workerPage, post);
 
-            if (postResult.status === 'FOUND' || postResult.status === 'LOGIN_REQUIRED' || postResult.status === 'POST_UNAVAILABLE') {
+            // Dừng ngay nếu không phải lỗi hệ thống/mạng (NOT_FOUND được coi là kết quả hợp lệ, không retry lãng phí)
+            if (postResult.status !== 'ERROR') {
               break;
             }
 
-            // Nếu gặp NOT_FOUND hoặc ERROR và chưa hết số lần thử
+            // Chỉ retry khi gặp lỗi mạng/timeout ERROR
             if (attempt < config.FB_MAX_RETRIES) {
-              console.warn(`[Publisher] Bài ${post.id} chưa nhận diện được (lần ${attempt}/${config.FB_MAX_RETRIES}). Thử lại...`);
-              await sleep(800);
+              console.warn(`[Publisher] Bài ${post.id} gặp sự cố mạng (lần ${attempt}/${config.FB_MAX_RETRIES}): ${postResult.reason}. Thử lại...`);
+              await sleep(300);
             }
           }
 

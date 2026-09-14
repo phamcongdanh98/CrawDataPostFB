@@ -1,6 +1,7 @@
 const Database = require('better-sqlite3');
 const config = require('./config');
 const { normalizeDateStr, getCanonicalPostUrl } = require('./utils');
+const { PUBLISHER_STATUS, POST_TYPE, SORT_COLUMNS } = require('./constants');
 
 let dbInstance = null;
 
@@ -78,6 +79,8 @@ function initSchema(db) {
   // Composite indexes để tăng tốc tối đa việc lọc và thống kê nhiều điều kiện
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_posts_filter ON posts(sync_batch_id, publisher_status, post_type);`); } catch (e) {}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_posts_time_filter ON posts(created_time, publisher_status);`); } catch (e) {}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_posts_status_time ON posts(publisher_status, created_time DESC);`); } catch (e) {}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_posts_batch_time ON posts(sync_batch_id, created_time DESC);`); } catch (e) {}
 
   // Gán đợt ban đầu cho các bài viết cũ chưa có sync_batch_id
   try {
@@ -177,9 +180,9 @@ function upsertPost(dbOrPost, postOrBatchId, maybeBatchId = null) {
         message = @message,
         created_time = @created_time,
         permalink_url = @permalink_url,
-        likes_count = @likes,
-        comments_count = @comments,
-        shares_count = @shares,
+        likes_count = CASE WHEN @likes > 0 THEN @likes WHEN likes_count > 0 THEN likes_count ELSE @likes END,
+        comments_count = CASE WHEN @comments > 0 THEN @comments WHEN comments_count > 0 THEN comments_count ELSE @comments END,
+        shares_count = CASE WHEN @shares > 0 THEN @shares WHEN shares_count > 0 THEN shares_count ELSE @shares END,
         post_type = COALESCE(@postType, post_type),
         sync_batch_id = COALESCE(@targetBatchId, sync_batch_id),
         updated_at = @now
@@ -237,6 +240,9 @@ function updatePublisherResult(id, result) {
       publisher_raw_text = COALESCE(@publisher_raw_text, publisher_raw_text),
       publisher_method = COALESCE(@publisher_method, publisher_method),
       publisher_checked_at = @now,
+      likes_count = CASE WHEN @likes IS NOT NULL AND @likes >= 0 THEN @likes ELSE likes_count END,
+      comments_count = CASE WHEN @comments IS NOT NULL AND @comments >= 0 THEN @comments ELSE comments_count END,
+      shares_count = CASE WHEN @shares IS NOT NULL AND @shares >= 0 THEN @shares ELSE shares_count END,
       post_type = CASE
         WHEN post_type = 'SHARED' THEN 'SHARED'
         WHEN @post_type = 'SHARED' THEN 'SHARED'
@@ -257,6 +263,9 @@ function updatePublisherResult(id, result) {
     publisher_profile_url: result.profileUrl || null,
     publisher_raw_text: result.rawText || null,
     publisher_method: result.method || null,
+    likes: (typeof result.likes === 'number' && !isNaN(result.likes)) ? result.likes : null,
+    comments: (typeof result.comments === 'number' && !isNaN(result.comments)) ? result.comments : null,
+    shares: (typeof result.shares === 'number' && !isNaN(result.shares)) ? result.shares : null,
     post_type: result.postType || null,
     last_error: result.reason || result.error || null,
     now
@@ -340,7 +349,10 @@ function buildPostsFilterClause(options = {}) {
     publisher,
     status,
     postType,
-    search
+    search,
+    minLikes,
+    minComments,
+    minShares
   } = options;
 
   const conditions = [];
@@ -375,6 +387,18 @@ function buildPostsFilterClause(options = {}) {
   if (search && search.trim()) {
     conditions.push(`(message LIKE @search OR id LIKE @search OR publisher_name LIKE @search)`);
     params.search = `%${search.trim()}%`;
+  }
+  if (minLikes !== undefined && minLikes !== '' && !isNaN(parseInt(minLikes, 10))) {
+    conditions.push(`likes_count >= @minLikes`);
+    params.minLikes = parseInt(minLikes, 10);
+  }
+  if (minComments !== undefined && minComments !== '' && !isNaN(parseInt(minComments, 10))) {
+    conditions.push(`comments_count >= @minComments`);
+    params.minComments = parseInt(minComments, 10);
+  }
+  if (minShares !== undefined && minShares !== '' && !isNaN(parseInt(minShares, 10))) {
+    conditions.push(`shares_count >= @minShares`);
+    params.minShares = parseInt(minShares, 10);
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -411,7 +435,8 @@ function getPosts(options = {}) {
     'created_time': 'created_time',
     'likes_count': 'likes_count',
     'comments_count': 'comments_count',
-    'shares_count': 'shares_count'
+    'shares_count': 'shares_count',
+    'total_engagements': '(likes_count + comments_count + shares_count)'
   };
   const sortCol = allowedSortColumns[sortBy] || 'created_time';
   const orderDir = (sortOrder && String(sortOrder).toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
@@ -445,7 +470,8 @@ function getAllPostsForExport(options = {}) {
     'created_time': 'created_time',
     'likes_count': 'likes_count',
     'comments_count': 'comments_count',
-    'shares_count': 'shares_count'
+    'shares_count': 'shares_count',
+    'total_engagements': '(likes_count + comments_count + shares_count)'
   };
   const sortCol = allowedSortColumns[sortBy] || 'created_time';
   const orderDir = (sortOrder && String(sortOrder).toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
@@ -587,6 +613,52 @@ function getPublishersList() {
 }
 
 /**
+ * Lấy danh sách bài viết theo danh sách ID (phục vụ Batch Rescan)
+ */
+function getPostsByIds(ids = []) {
+  if (!Array.isArray(ids) || ids.length === 0) return [];
+  const db = getDb();
+  const placeholders = ids.map(() => '?').join(',');
+  return db.prepare(`
+    SELECT * FROM posts
+    WHERE id IN (${placeholders})
+    ORDER BY created_time DESC
+  `).all(...ids);
+}
+
+/**
+ * Lấy bảng xếp hạng hiệu suất Người đăng (Leaderboard & KPI Analytics)
+ */
+function getPublisherLeaderboard(options = {}) {
+  const db = getDb();
+  const { conditions, params } = buildPostsFilterClause(options);
+  const pubConditions = [`publisher_status = 'FOUND'`, `publisher_name IS NOT NULL`, `TRIM(publisher_name) != ''`];
+  if (conditions.length > 0) {
+    pubConditions.push(...conditions);
+  }
+  const where = pubConditions.join(' AND ');
+
+  return db.prepare(`
+    SELECT
+      publisher_name,
+      COUNT(*) as post_count,
+      COUNT(*) as total_posts,
+      COALESCE(SUM(likes_count), 0) as total_likes,
+      COALESCE(SUM(comments_count), 0) as total_comments,
+      COALESCE(SUM(shares_count), 0) as total_shares,
+      COALESCE(SUM(likes_count + comments_count + shares_count), 0) as total_engagements,
+      ROUND(CAST(COALESCE(SUM(likes_count + comments_count + shares_count), 0) AS FLOAT) / COUNT(*), 1) as avg_engagement,
+      SUM(CASE WHEN post_type = 'SHARED' THEN 1 ELSE 0 END) as shared_count,
+      SUM(CASE WHEN post_type != 'SHARED' OR post_type IS NULL THEN 1 ELSE 0 END) as original_count,
+      MAX(created_time) as last_posted_at
+    FROM posts
+    WHERE ${where}
+    GROUP BY publisher_name
+    ORDER BY total_engagements DESC, post_count DESC
+  `).all(params);
+}
+
+/**
  * Xóa sạch toàn bộ dữ liệu bài viết và các đợt đồng bộ
  */
 function clearAllPostsData() {
@@ -599,11 +671,6 @@ function clearAllPostsData() {
   });
   runTx();
   return { deletedPosts, deletedBatches };
-}
-
-function getPostById(id) {
-  const db = getDb();
-  return db.prepare('SELECT * FROM posts WHERE id = ?').get(id);
 }
 
 function closeDb() {
@@ -624,10 +691,12 @@ module.exports = {
   updatePublisherResult,
   getPendingPosts,
   getPosts,
+  getPostsByIds,
   getAllPostsForExport,
   getPostById,
   getStats,
   getPublishersList,
+  getPublisherLeaderboard,
   createSyncBatch,
   getSyncBatches
 };

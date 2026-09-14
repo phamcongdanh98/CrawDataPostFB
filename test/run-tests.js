@@ -183,9 +183,9 @@ async function runAllTests() {
     const postAfterFound = db.getPostById(testPostId);
     assert.strictEqual(postAfterFound.publisher_name, 'Tester Admin');
     assert.strictEqual(postAfterFound.publisher_status, 'FOUND');
-    assert.strictEqual(postAfterFound.likes_count, 10, 'likes_count phải giữ nguyên từ Graph API là 10');
-    assert.strictEqual(postAfterFound.comments_count, 5, 'comments_count phải giữ nguyên từ Graph API là 5');
-    assert.strictEqual(postAfterFound.shares_count, 2, 'shares_count phải giữ nguyên từ Graph API là 2');
+    assert.strictEqual(postAfterFound.likes_count, 116, 'likes_count phải là 116 cập nhật từ crawler');
+    assert.strictEqual(postAfterFound.comments_count, 19, 'comments_count phải là 19 cập nhật từ crawler');
+    assert.strictEqual(postAfterFound.shares_count, 25, 'shares_count phải là 25 cập nhật từ crawler');
     assert.strictEqual(postAfterFound.post_type, 'SHARED', 'post_type phải là SHARED');
 
     // 3. Upsert lại với tương tác mới (Graph API sync lại)
@@ -286,6 +286,29 @@ async function runAllTests() {
     await browser.close();
   });
 
+  await test('detectPublisher bóc tách chính xác likes, comments, shares từ DOM', async () => {
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    const mockHtml = `
+      <html><body>
+        <div role="dialog">
+          <div>Người đăng: Nguyễn Văn A</div>
+          <div role="button" aria-label="Thích"><span dir="auto">42</span></div>
+          <div role="button" aria-label="Viết bình luận"><span dir="auto">7</span></div>
+          <div role="button" aria-label="Chia sẻ"><span dir="auto">3</span></div>
+        </div>
+      </body></html>
+    `;
+    await page.setContent(mockHtml);
+    const result = await detector.detectPublisher(page, { postId: 'mock_test_123' });
+    assert.strictEqual(result.status, 'FOUND');
+    assert.strictEqual(result.name, 'Nguyễn Văn A');
+    assert.strictEqual(result.likes, 42, 'Likes phải bóc tách được 42');
+    assert.strictEqual(result.comments, 7, 'Comments phải bóc tách được 7');
+    assert.strictEqual(result.shares, 3, 'Shares phải bóc tách được 3');
+    await browser.close();
+  });
+
   // 6. EXPRESS SERVER VÀ API ENDPOINTS
   describe('6. Máy chủ Express & API Endpoints');
   const { app } = require('../src/server');
@@ -361,6 +384,51 @@ async function runAllTests() {
     assert.ok(contentType.includes('spreadsheetml.sheet'));
     const arrayBuffer = await res.arrayBuffer();
     assert.ok(arrayBuffer.byteLength > 1000, 'Kích thước file Excel hợp lệ');
+  });
+
+  await test('db.getPublisherLeaderboard trả về bảng xếp hạng người đăng có đầy đủ chỉ số', () => {
+    const leaderboard = db.getPublisherLeaderboard();
+    assert.ok(Array.isArray(leaderboard), 'Leaderboard phải là mảng');
+    const tester = leaderboard.find(l => l.publisher_name === 'Tester Admin');
+    assert.ok(tester, 'Tester Admin phải xuất hiện trong Leaderboard');
+    assert.ok(tester.total_posts >= 1, 'Số bài phải >= 1');
+    assert.strictEqual(typeof tester.total_engagements, 'number');
+    assert.strictEqual(typeof tester.avg_engagement, 'number');
+  });
+
+  await test('db.getPostsByIds trích xuất chính xác danh sách bài theo mảng ID', () => {
+    const found = db.getPostsByIds(['test_post_non_existent', 'fake_id_123']);
+    assert.ok(Array.isArray(found));
+    assert.strictEqual(found.length, 0);
+  });
+
+  await test('db.getPosts hỗ trợ lọc theo minLikes', () => {
+    const resMinLikes = db.getPosts({ minLikes: 5 });
+    assert.ok(resMinLikes.total >= 1, 'Phải tìm thấy bài viết có minLikes >= 5');
+    const resHighLikes = db.getPosts({ minLikes: 999999 });
+    assert.strictEqual(resHighLikes.total, 0, 'Không thể có bài nào vượt quá 999999 likes');
+  });
+
+  await test('GET /api/publisher-leaderboard trả về mảng xếp hạng', async () => {
+    const { status, data } = await fetchJson('/api/publisher-leaderboard');
+    assert.strictEqual(status, 200);
+    assert.ok(Array.isArray(data), 'Phản hồi từ /api/publisher-leaderboard phải là một mảng');
+  });
+
+  await test('GET /api/posts/:id trả về 404 cho id không tồn tại', async () => {
+    const res = await fetch(`${baseUrl}/api/posts/khong_ton_tai_12345`);
+    assert.strictEqual(res.status, 404);
+  });
+
+  await test('POST /api/posts/batch-rescan kiểm tra validate đầu vào', async () => {
+    const res = await fetch(`${baseUrl}/api/posts/batch-rescan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ postIds: [] })
+    });
+    assert.strictEqual(res.status, 400);
+    const json = await res.json();
+    assert.ok(json.error);
   });
 
   // Dọn dẹp dữ liệu test trong SQLite và đóng testServer

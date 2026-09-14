@@ -12,6 +12,8 @@ const state = {
   status: 'ALL',
   postType: 'ALL',
   search: '',
+  minLikes: '',
+  selectedPostIds: new Set(),
   sortBy: 'created_time',
   sortOrder: 'DESC',
   page: 1,
@@ -136,6 +138,20 @@ const filterPublisherSelect = document.getElementById('filterPublisherSelect');
 const filterSearch = document.getElementById('filterSearch');
 const btnClearSearch = document.getElementById('btnClearSearch');
 const filterStatus = document.getElementById('filterStatus');
+const filterMinLikes = document.getElementById('filterMinLikes');
+const filterSortBy = document.getElementById('filterSortBy');
+const selectAllPosts = document.getElementById('selectAllPosts');
+const batchActionBar = document.getElementById('batchActionBar');
+const selectedPostsCount = document.getElementById('selectedPostsCount');
+const btnBatchRescanSelected = document.getElementById('btnBatchRescanSelected');
+const btnBatchRescanNotFound = document.getElementById('btnBatchRescanNotFound');
+const btnClearSelectedPosts = document.getElementById('btnClearSelectedPosts');
+const btnCopySummaryReport = document.getElementById('btnCopySummaryReport');
+const btnRefreshLeaderboard = document.getElementById('btnRefreshLeaderboard');
+const btnCopyPostLink = document.getElementById('btnCopyPostLink');
+const btnCopyPostText = document.getElementById('btnCopyPostText');
+const btnRescanFromModal = document.getElementById('btnRescanFromModal');
+const rescanModalSpinner = document.getElementById('rescanModalSpinner');
 const btnRefreshList = document.getElementById('btnRefreshList');
 const activeFilterNotice = document.getElementById('activeFilterNotice');
 const currentFilterPublisherName = document.getElementById('currentFilterPublisherName');
@@ -440,7 +456,8 @@ async function checkConfigStatus() {
     }
     const settingSpeedMode = document.getElementById('settingSpeedMode');
     if (settingSpeedMode && data.delayMinMs) {
-      if (data.delayMinMs <= 150) settingSpeedMode.value = 'turbo';
+      if (data.delayMinMs <= 50) settingSpeedMode.value = 'warp';
+      else if (data.delayMinMs <= 150) settingSpeedMode.value = 'turbo';
       else if (data.delayMinMs <= 500) settingSpeedMode.value = 'balanced';
       else settingSpeedMode.value = 'safe';
     }
@@ -482,6 +499,7 @@ function updateExportLinks() {
   if (state.status !== 'ALL') params.set('status', state.status);
   if (state.postType && state.postType !== 'ALL') params.set('postType', state.postType);
   if (state.search) params.set('search', state.search);
+  if (state.minLikes) params.set('minLikes', state.minLikes);
   if (state.sortBy) params.set('sortBy', state.sortBy);
   if (state.sortOrder) params.set('sortOrder', state.sortOrder);
 
@@ -519,6 +537,7 @@ function updateStatsFilterBanner(isFiltering) {
 
   const tags = [];
   if (state.search && state.search.trim()) tags.push(`Từ khóa: "${state.search.trim()}"`);
+  if (state.minLikes) tags.push(`Min Like: ≥ ${state.minLikes}`);
   if (state.postType && state.postType !== 'ALL') tags.push(`Loại: ${state.postType === 'SHARED' ? 'Chia sẻ' : 'Tự đăng'}`);
   if (state.status && state.status !== 'ALL') {
     const statusMap = { 'FOUND': 'Đã xác định', 'PENDING': 'Chờ quét', 'NOT_FOUND': 'Chưa nhận diện', 'ERROR': 'Lỗi' };
@@ -542,12 +561,14 @@ async function fetchStats() {
     if (state.status && state.status !== 'ALL') params.set('status', state.status);
     if (state.postType && state.postType !== 'ALL') params.set('postType', state.postType);
     if (state.search && state.search.trim()) params.set('search', state.search.trim());
+    if (state.minLikes) params.set('minLikes', state.minLikes);
 
     const isFiltering = Boolean(
       (state.batchId && state.batchId !== 'ALL') ||
       state.since ||
       state.until ||
       state.publisher ||
+      state.minLikes ||
       (state.status && state.status !== 'ALL') ||
       (state.postType && state.postType !== 'ALL') ||
       (state.search && state.search.trim())
@@ -681,12 +702,13 @@ async function fetchPosts() {
   if (state.status !== 'ALL') params.set('status', state.status);
   if (state.postType && state.postType !== 'ALL') params.set('postType', state.postType);
   if (state.search) params.set('search', state.search);
+  if (state.minLikes) params.set('minLikes', state.minLikes);
   if (state.sortBy) params.set('sortBy', state.sortBy);
   if (state.sortOrder) params.set('sortOrder', state.sortOrder);
 
   postsTableBody.innerHTML = `
     <tr>
-      <td colspan="7" class="empty-cell">
+      <td colspan="8" class="empty-cell">
         <div class="empty-state">
           <span class="spinner"></span>
           <span>Đang tải danh sách bài viết...</span>
@@ -706,11 +728,29 @@ async function fetchPosts() {
   } catch (err) {
     postsTableBody.innerHTML = `
       <tr>
-        <td colspan="7" class="empty-cell text-danger">
+        <td colspan="8" class="empty-cell text-danger">
           Lỗi khi tải bài viết: ${escapeHtml(err.message)}
         </td>
       </tr>
     `;
+  }
+}
+
+function updateBatchActionBar() {
+  if (!batchActionBar) return;
+  const count = state.selectedPostIds.size;
+  if (count > 0) {
+    batchActionBar.style.display = 'flex';
+    if (selectedPostsCount) selectedPostsCount.textContent = count.toLocaleString();
+  } else {
+    batchActionBar.style.display = 'none';
+  }
+
+  if (selectAllPosts && state.currentPostsCache && state.currentPostsCache.length > 0) {
+    const allChecked = state.currentPostsCache.every(p => state.selectedPostIds.has(p.id));
+    const someChecked = state.currentPostsCache.some(p => state.selectedPostIds.has(p.id));
+    selectAllPosts.checked = allChecked;
+    selectAllPosts.indeterminate = someChecked && !allChecked;
   }
 }
 
@@ -720,7 +760,7 @@ function renderPostsTable(items) {
   if (items.length === 0) {
     postsTableBody.innerHTML = `
       <tr>
-        <td colspan="7" class="empty-cell">
+        <td colspan="8" class="empty-cell">
           <div class="empty-state">
             <span class="empty-icon">📭</span>
             <h4>Không tìm thấy bài viết nào phù hợp</h4>
@@ -731,10 +771,11 @@ function renderPostsTable(items) {
         </td>
       </tr>
     `;
+    updateBatchActionBar();
     return;
   }
 
-  items.forEach((p, index) => {
+  items.forEach((p) => {
     const tr = document.createElement('tr');
 
     // Badge trạng thái bóc tách
@@ -788,7 +829,12 @@ function renderPostsTable(items) {
       </div>
     `;
 
+    const isChecked = state.selectedPostIds.has(p.id);
+
     tr.innerHTML = `
+      <td style="text-align: center;">
+        <input type="checkbox" class="post-checkbox" data-id="${escapeHtml(p.id)}" ${isChecked ? 'checked' : ''}>
+      </td>
       <td style="white-space: nowrap; font-size: 0.82rem; color: var(--text-muted); font-variant-numeric: tabular-nums;">
         ${formattedDate}
       </td>
@@ -809,6 +855,19 @@ function renderPostsTable(items) {
         </a>
       </td>
     `;
+
+    // Sự kiện checkbox chọn bài
+    const chk = tr.querySelector('.post-checkbox');
+    if (chk) {
+      chk.addEventListener('change', () => {
+        if (chk.checked) {
+          state.selectedPostIds.add(p.id);
+        } else {
+          state.selectedPostIds.delete(p.id);
+        }
+        updateBatchActionBar();
+      });
+    }
 
     // Sự kiện quét lại bài viết đơn lẻ
     const btnRescan = tr.querySelector('.btn-rescan-post');
@@ -855,6 +914,8 @@ function renderPostsTable(items) {
 
     postsTableBody.appendChild(tr);
   });
+
+  updateBatchActionBar();
 }
 
 function renderPagination(total) {
@@ -934,6 +995,166 @@ if (filterPublisherSelect) {
   });
 }
 
+if (filterMinLikes) {
+  filterMinLikes.addEventListener('input', debounce((e) => {
+    state.minLikes = e.target.value.trim();
+    state.page = 1;
+    updateExportLinks();
+    fetchPosts();
+  }, 350));
+}
+
+if (filterSortBy) {
+  filterSortBy.addEventListener('change', (e) => {
+    state.sortBy = e.target.value;
+    state.page = 1;
+    updateSortIndicators();
+    updateExportLinks();
+    fetchPosts();
+  });
+}
+
+// Checkbox chọn tất cả bài viết trên trang
+if (selectAllPosts) {
+  selectAllPosts.addEventListener('change', () => {
+    const isChecked = selectAllPosts.checked;
+    (state.currentPostsCache || []).forEach(p => {
+      if (isChecked) {
+        state.selectedPostIds.add(p.id);
+      } else {
+        state.selectedPostIds.delete(p.id);
+      }
+    });
+    document.querySelectorAll('.post-checkbox').forEach(cb => {
+      cb.checked = isChecked;
+    });
+    updateBatchActionBar();
+  });
+}
+
+// Nút Quét lại bài đã chọn
+if (btnBatchRescanSelected) {
+  btnBatchRescanSelected.addEventListener('click', async () => {
+    const postIds = Array.from(state.selectedPostIds);
+    if (postIds.length === 0) {
+      showToast({ type: 'warning', title: 'Chưa chọn bài viết', message: 'Vui lòng tích chọn ít nhất 1 bài viết.' });
+      return;
+    }
+    btnBatchRescanSelected.disabled = true;
+    const spinner = document.getElementById('batchRescanSpinner');
+    if (spinner) spinner.style.display = 'inline-block';
+
+    try {
+      const res = await fetch('/api/posts/batch-rescan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ postIds })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        showToast({ type: 'danger', title: 'Lỗi', message: data.error || 'Không thể quét lại' });
+      } else {
+        showToast({ type: 'success', title: 'Đã bắt đầu', message: data.message });
+        startPollingJobState();
+      }
+    } catch (err) {
+      showToast({ type: 'danger', title: 'Lỗi kết nối', message: err.message });
+    } finally {
+      btnBatchRescanSelected.disabled = false;
+      if (spinner) spinner.style.display = 'none';
+    }
+  });
+}
+
+// Nút Quét lại tất cả bài NOT_FOUND
+if (btnBatchRescanNotFound) {
+  btnBatchRescanNotFound.addEventListener('click', async () => {
+    try {
+      const res = await fetch('/api/detect-publishers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force: false, includeNotFound: true })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        showToast({ type: 'danger', title: 'Lỗi', message: data.error || 'Không thể bắt đầu' });
+      } else {
+        showToast({ type: 'success', title: 'Đã bắt đầu', message: 'Đang quét lại tất cả các bài chưa nhận diện được người đăng...' });
+        startPollingJobState();
+      }
+    } catch (err) {
+      showToast({ type: 'danger', title: 'Lỗi kết nối', message: err.message });
+    }
+  });
+}
+
+// Nút Bỏ chọn tất cả
+if (btnClearSelectedPosts) {
+  btnClearSelectedPosts.addEventListener('click', () => {
+    state.selectedPostIds.clear();
+    document.querySelectorAll('.post-checkbox').forEach(cb => { cb.checked = false; });
+    updateBatchActionBar();
+  });
+}
+
+// Nút Sao chép báo cáo tóm tắt KPI (Clipboard Summary)
+if (btnCopySummaryReport) {
+  btnCopySummaryReport.addEventListener('click', async () => {
+    try {
+      btnCopySummaryReport.disabled = true;
+      btnCopySummaryReport.textContent = '⏳ Đang tổng hợp...';
+
+      const [statsRes, lbRes] = await Promise.all([
+        fetch('/api/stats'),
+        fetch('/api/publisher-leaderboard')
+      ]);
+      const stats = await statsRes.json();
+      const leaderboard = await lbRes.json();
+
+      const sinceStr = sinceDateInput.value.trim() || 'Toàn thời gian';
+      const untilStr = untilDateInput.value.trim() || '';
+      const dateRangeStr = untilStr ? `${sinceStr} - ${untilStr}` : sinceStr;
+
+      let report = `📊 BÁO CÁO HIỆU SUẤT FANPAGE FACEBOOK\n`;
+      report += `⏱️ Thời gian: ${dateRangeStr}\n`;
+      report += `📝 Tổng số bài viết: ${(stats.totalPosts || 0).toLocaleString()} bài (Tự đăng: ${(stats.originalPosts || 0).toLocaleString()} | Chia sẻ: ${(stats.sharedPosts || 0).toLocaleString()})\n`;
+      report += `✅ Đã nhận diện tác giả: ${(stats.found || 0).toLocaleString()} bài\n`;
+      report += `❤️ Lượt Thích: ${(stats.totalLikes || 0).toLocaleString()}\n`;
+      report += `💬 Bình luận: ${(stats.totalComments || 0).toLocaleString()}\n`;
+      report += `🔁 Chia sẻ: ${(stats.totalShares || 0).toLocaleString()}\n`;
+      report += `⭐ TỔNG TƯƠNG TÁC: ${(stats.totalEngagements || 0).toLocaleString()}\n\n`;
+
+      report += `🏆 BẢNG XẾP HẠNG QUẢN TRỊ VIÊN / NGƯỜI ĐĂNG:\n`;
+      if (Array.isArray(leaderboard) && leaderboard.length > 0) {
+        leaderboard.slice(0, 10).forEach((pub, idx) => {
+          const medal = idx === 0 ? '🥇' : (idx === 1 ? '🥈' : (idx === 2 ? '🥉' : `#${idx + 1}`));
+          report += `${medal} ${pub.publisher_name}: ${pub.post_count} bài | ⭐ ${pub.total_engagements.toLocaleString()} tương tác (TB: ${pub.avg_engagement}/bài)\n`;
+        });
+      } else {
+        report += `(Chưa có dữ liệu người đăng)\n`;
+      }
+
+      report += `\n📅 Xuất lúc: ${new Date().toLocaleString('vi-VN')} qua Fanpage Publisher Tool`;
+
+      await navigator.clipboard.writeText(report);
+      showToast({ type: 'success', title: 'Đã sao chép báo cáo!', message: 'Nội dung tóm tắt KPI đã lưu vào bộ nhớ tạm (sẵn sàng dán vào Zalo/Telegram).' });
+    } catch (err) {
+      showToast({ type: 'danger', title: 'Lỗi', message: 'Không thể sao chép: ' + err.message });
+    } finally {
+      btnCopySummaryReport.disabled = false;
+      btnCopySummaryReport.textContent = '📋 Báo cáo nhanh';
+    }
+  });
+}
+
+// Nút làm mới Leaderboard
+if (btnRefreshLeaderboard) {
+  btnRefreshLeaderboard.addEventListener('click', () => {
+    fetchPublishers();
+    showToast({ type: 'info', title: 'Đã làm mới', message: 'Bảng xếp hạng Người đăng đã được cập nhật.' });
+  });
+}
+
 // Sắp xếp cột Ngày đăng
 const colSortCreated = document.querySelector('.col-sortable[data-sort="created_time"]');
 if (colSortCreated) {
@@ -976,14 +1197,14 @@ btnRefreshList.addEventListener('click', () => {
 });
 
 // ==========================================================================
-// VIEW 2: BẢNG XẾP HẠNG NGƯỜI ĐĂNG (PUBLISHERS TABLE)
+// VIEW 2: BẢNG XẾP HẠNG NGƯỜI ĐĂNG (PUBLISHERS LEADERBOARD)
 // ==========================================================================
 
 async function fetchPublishers() {
   try {
-    const res = await fetch('/api/stats');
+    const res = await fetch('/api/publisher-leaderboard');
     const data = await res.json();
-    renderPublisherTable(data.publishers || []);
+    renderPublisherTable(Array.isArray(data) ? data : []);
   } catch (err) {
     console.error('Lỗi khi tải danh sách người đăng:', err);
   }
@@ -996,10 +1217,10 @@ function renderPublisherTable(publishers) {
   if (publishers.length === 0) {
     publisherTableBody.innerHTML = `
       <tr>
-        <td colspan="5" class="empty-cell">
+        <td colspan="9" class="empty-cell">
           <div class="empty-state">
             <span class="empty-icon">👥</span>
-            <h4>Chưa có dữ liệu người đăng bài</h4>
+            <h4>Chưa có dữ liệu bảng xếp hạng người đăng</h4>
             <p style="font-size: 0.8rem; color: var(--text-dim); margin-top: 4px;">
               Hãy bấm <strong>"Tìm người đăng"</strong> ở trên để bóc tách tên quản trị viên.
             </p>
@@ -1010,40 +1231,43 @@ function renderPublisherTable(publishers) {
     return;
   }
 
-  // Tính tổng số bài đã có người đăng để tính phần trăm
-  const totalFoundPosts = publishers.reduce((acc, cur) => acc + cur.count, 0);
-  const medals = ['🥇 #1', '🥈 #2', '🥉 #3'];
-
   publishers.forEach((p, idx) => {
     const isSelected = state.publisher === p.publisher_name;
-    const rankBadge = idx < 3 ? `<strong style="color: #fbbf24;">${medals[idx]}</strong>` : `#${idx + 1}`;
-    const pct = totalFoundPosts > 0 ? Math.round((p.count / totalFoundPosts) * 100) : 0;
+    const rankClass = idx === 0 ? 'rank-1' : (idx === 1 ? 'rank-2' : (idx === 2 ? 'rank-3' : ''));
     const initial = p.publisher_name.charAt(0).toUpperCase();
 
     const tr = document.createElement('tr');
     tr.className = isSelected ? 'row-selected' : '';
     tr.innerHTML = `
-      <td style="text-align: center; font-size: 0.88rem;">${rankBadge}</td>
+      <td style="text-align: center;">
+        <span class="rank-badge ${rankClass}">${idx + 1}</span>
+      </td>
       <td>
         <div class="publisher-cell">
           <span class="publisher-avatar">${initial}</span>
-          <strong style="color: #fff; font-size: 0.9rem;">${escapeHtml(p.publisher_name)}</strong>
-        </div>
-      </td>
-      <td>
-        <div style="display: flex; align-items: center; gap: 0.6rem;">
-          <div style="flex: 1; height: 6px; background: #1e293b; border-radius: 999px; overflow: hidden;">
-            <div style="width: ${pct}%; height: 100%; background: linear-gradient(90deg, #3b82f6, #10b981); border-radius: 999px;"></div>
+          <div>
+            <strong style="color: #fff; font-size: 0.9rem;">${escapeHtml(p.publisher_name)}</strong>
+            <div style="font-size: 0.76rem; color: var(--text-dim); margin-top: 2px;">
+              📝 ${p.original_count} tự đăng • 🔄 ${p.shared_count} chia sẻ
+            </div>
           </div>
-          <span style="font-size: 0.75rem; color: var(--text-muted); width: 32px; text-align: right;">${pct}%</span>
         </div>
       </td>
-      <td style="text-align: right;">
-        <span class="badge badge-success" style="font-size: 0.85rem; font-weight: 700;">${p.count.toLocaleString()} bài</span>
+      <td style="text-align: center;">
+        <span class="badge badge-success" style="font-size: 0.82rem; font-weight: 700;">${p.post_count.toLocaleString()} bài</span>
+      </td>
+      <td style="text-align: center; color: #f87171; font-weight: 600;">${(p.total_likes || 0).toLocaleString()}</td>
+      <td style="text-align: center; color: #60a5fa; font-weight: 600;">${(p.total_comments || 0).toLocaleString()}</td>
+      <td style="text-align: center; color: #34d399; font-weight: 600;">${(p.total_shares || 0).toLocaleString()}</td>
+      <td style="text-align: center;">
+        <span class="engagement-pill">⭐ ${(p.total_engagements || 0).toLocaleString()}</span>
+      </td>
+      <td style="text-align: center;">
+        <span class="avg-pill">${p.avg_engagement || 0}</span>
       </td>
       <td style="text-align: center;">
         <button class="btn btn-xs ${isSelected ? 'btn-primary' : 'btn-outline'} btn-filter-pub">
-          ${isSelected ? 'Đang chọn ✕' : 'Xem bài viết ➜'}
+          ${isSelected ? 'Đang chọn ✕' : 'Lọc bài ➜'}
         </button>
       </td>
     `;
@@ -1234,8 +1458,11 @@ filterBatchSelect.addEventListener('change', (e) => {
 // MODAL CHI TIẾT BÀI VIẾT (POST DETAIL MODAL)
 // ==========================================================================
 
+let currentModalPost = null;
+
 function openPostDetailModal(post) {
   if (!postDetailModal) return;
+  currentModalPost = post;
 
   const formattedDate = formatVnDateDisplay(post.created_time);
   detailPostTime.textContent = formattedDate || '-';
@@ -1285,6 +1512,78 @@ if (btnDismissPostDetailModal) btnDismissPostDetailModal.addEventListener('click
 if (postDetailModal) {
   postDetailModal.addEventListener('click', (e) => {
     if (e.target === postDetailModal) closePostDetailModal();
+  });
+}
+
+if (btnCopyPostLink) {
+  btnCopyPostLink.addEventListener('click', async () => {
+    if (!currentModalPost) return;
+    const url = getCanonicalPostUrl(currentModalPost);
+    if (!url) {
+      showToast({ type: 'warning', message: 'Không có đường dẫn cho bài viết này' });
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      showToast({ type: 'success', title: 'Đã sao chép link', message: 'Đường dẫn bài viết đã được lưu vào clipboard.' });
+    } catch (e) {
+      prompt('Sao chép đường dẫn bài viết:', url);
+    }
+  });
+}
+
+if (btnCopyPostText) {
+  btnCopyPostText.addEventListener('click', async () => {
+    if (!currentModalPost) return;
+    const text = currentModalPost.message || '';
+    if (!text) {
+      showToast({ type: 'info', message: 'Bài viết không có nội dung chữ.' });
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast({ type: 'success', title: 'Đã sao chép nội dung', message: 'Nội dung bài viết đã được lưu vào clipboard.' });
+    } catch (e) {
+      prompt('Sao chép nội dung bài viết:', text);
+    }
+  });
+}
+
+if (btnRescanFromModal) {
+  btnRescanFromModal.addEventListener('click', async () => {
+    if (!currentModalPost || !currentModalPost.id) return;
+    btnRescanFromModal.disabled = true;
+    if (rescanModalSpinner) rescanModalSpinner.style.display = 'inline-block';
+
+    try {
+      const res = await fetch(`/api/posts/${encodeURIComponent(currentModalPost.id)}/rescan`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        showToast({ type: 'error', title: 'Lỗi quét bài', message: data.error || 'Không thể quét lại bài viết' });
+      } else {
+        showToast({
+          type: data.status === 'FOUND' ? 'success' : (data.status === 'NOT_FOUND' ? 'warning' : 'error'),
+          title: data.status === 'FOUND' ? 'Nhận diện thành công!' : 'Kết quả quét',
+          message: data.name ? `Người đăng: ${data.name}` : (data.reason || `Trạng thái: ${data.status}`)
+        });
+
+        // Cập nhật lại đối tượng modal hiện tại
+        currentModalPost.publisher_status = data.status;
+        currentModalPost.publisher_name = data.name || null;
+        openPostDetailModal(currentModalPost);
+
+        // Cập nhật lại danh sách và thống kê
+        fetchPosts();
+        fetchStats();
+      }
+    } catch (err) {
+      showToast({ type: 'error', title: 'Lỗi kết nối', message: err.message });
+    } finally {
+      btnRescanFromModal.disabled = false;
+      if (rescanModalSpinner) rescanModalSpinner.style.display = 'none';
+    }
   });
 }
 
@@ -1542,7 +1841,10 @@ btnSaveSettings.addEventListener('click', async () => {
     const speedMode = document.getElementById('settingSpeedMode')?.value || 'turbo';
     let delayMinMs = 50;
     let delayMaxMs = 150;
-    if (speedMode === 'balanced') {
+    if (speedMode === 'warp') {
+      delayMinMs = 10;
+      delayMaxMs = 50;
+    } else if (speedMode === 'balanced') {
       delayMinMs = 200;
       delayMaxMs = 500;
     } else if (speedMode === 'safe') {

@@ -354,12 +354,25 @@ Mở trình duyệt bất kỳ và truy cập: 👉 **[http://localhost:3000](ht
      * Bấm **"Tìm người đăng"**: Trình duyệt ngầm Chromium chạy đa luồng (10 luồng song song) mở bài viết và bóc tách tên Quản trị viên trong vòng vài chục giây.
    * **Cách 2 (Khuyên dùng):**
      * Bấm **"⚡ Đồng bộ toàn diện"**: Hệ thống tự động làm từ A đến Z (Lấy bài viết -> Quét người đăng) chỉ với 1 cú click.
-3. **Thống kê thông minh (Dynamic KPI Cards):**
-   * 6 Thẻ chỉ số trên cùng sẽ **tự động nhảy số theo bộ lọc**:
-     * Khi bạn chọn xem riêng 1 Quản trị viên (Ví dụ: *Hạ Vân*), toàn bộ 6 thẻ sẽ hiển thị tổng số bài, tổng Like, Comment, Share của riêng Quản trị viên đó!
-4. **Mở xem bài viết gốc:**
-   * Bấm vào biểu tượng **Mũi tên chéo (↗)** ở cột Thao tác: Hệ thống mở trực tiếp bài viết gốc trên Facebook theo liên kết Canonical vĩnh viễn, không bao giờ bị lỗi 404.
-5. **Xuất báo cáo Doanh nghiệp:**
+3. **Thống kê thông minh & Bảng xếp hạng Người đăng (Leaderboard):**
+   * **Tab Danh sách bài viết:** 6 Thẻ chỉ số tự động nhảy số theo bộ lọc thời gian, loại bài, người đăng và số Like tối thiểu.
+   * **Tab Bảng xếp hạng Người đăng (MỚI):** Xếp hạng năng suất và chất lượng content của từng Quản trị viên/Biên tập viên theo **Tổng tương tác** và **Tương tác trung bình/bài (Avg Engagement)**.
+   * **Nút "📋 Sao chép tóm tắt KPI":** Xuất báo cáo ngắn gọn vào Clipboard để gửi sếp qua Zalo/Telegram chỉ với 1 click!
+4. **Thao tác hàng loạt (Batch Actions - MỚI):**
+   * Tích chọn một hoặc nhiều bài viết trên bảng dữ liệu.
+   * Bấm **"🔄 Quét lại bài đã chọn"** hoặc **"⚡ Quét lại toàn bộ bài Chưa nhận diện (NOT_FOUND)"** để quét tự động ngay trên danh sách.
+5. **Xem chi tiết & Sao chép nhanh (Post Detail Modal - MỚI):**
+   * Nhấn vào bất kỳ bài viết nào để mở popup xem đầy đủ nội dung, lượt tương tác, trạng thái.
+   * Bấm **"🔗 Sao chép link"**, **"📋 Sao chép nội dung"** hoặc **"🔄 Quét lại bài này"** trực tiếp trong popup.
+6. **Tối ưu tốc độ Siêu tốc (Turbo & Warp Mode - MỚI):**
+   * Bóc tách DOM bằng thuật toán `TreeWalker` trực tiếp trên text node, không gây layout thrashing -> thời gian nhận diện chỉ còn < 2ms/bài!
+   * Chặn toàn bộ beacon và telemetry mạng rác (`falco`, `privacy_sandbox`, `comet_activity`).
+   * Tùy chọn 4 chế độ độ trễ trong **Cài đặt**:
+     - 🚀 **Tên lửa (Warp):** 10ms - 50ms (Siêu tốc độ)
+     - ⚡ **Nhanh (Turbo):** 50ms - 150ms (Mặc định khuyên dùng)
+     - ⏱️ **Cân bằng:** 200ms - 500ms
+     - 🛡️ **An toàn:** 1.0s - 2.5s
+7. **Xuất báo cáo Doanh nghiệp:**
    * Bấm **"Xuất Excel"** để tải file `.xlsx` được thiết kế đẹp mắt, viền ô tinh tế, số liệu định dạng chuẩn, kèm **Sheet 2: Bảng xếp hạng năng suất Quản trị viên**.
    * Bấm **"Xuất CSV"** để lấy file UTF-8 mở ngay trên Excel không bị lỗi font tiếng Việt.
 

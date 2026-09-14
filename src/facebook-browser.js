@@ -76,6 +76,7 @@ async function getBrowserContext(customOptions = {}) {
       resourceType === 'ping' ||
       resourceType === 'beacon' ||
       resourceType === 'csp_report' ||
+      resourceType === 'websocket' ||
       url.endsWith('.mp4') ||
       url.endsWith('.webm') ||
       url.endsWith('.mp3') ||
@@ -85,6 +86,17 @@ async function getBrowserContext(customOptions = {}) {
       url.includes('/ajax/bz') ||
       url.includes('/browser_reporting') ||
       url.includes('/ajax/haste-response/') ||
+      url.includes('/chat/pull') ||
+      url.includes('/pull/') ||
+      url.includes('presence') ||
+      url.includes('hsts-pixel') ||
+      url.includes('facebook.com/tr/') ||
+      url.includes('telemetry') ||
+      url.includes('falco') ||
+      url.includes('gateway.facebook.com') ||
+      url.includes('comet_activity') ||
+      url.includes('privacy_sandbox') ||
+      url.includes('web_speed') ||
       url.includes('logging_client_events') ||
       url.includes('connect.facebook.net') ||
       url.includes('instagram.com') ||
