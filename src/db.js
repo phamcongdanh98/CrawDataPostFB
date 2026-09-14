@@ -659,6 +659,69 @@ function getPublisherLeaderboard(options = {}) {
 }
 
 /**
+ * Lấy dữ liệu tổng hợp phục vụ hiển thị biểu đồ trực quan (Chart.js)
+ * @param {Object} options - Các bộ lọc tương tự getPosts
+ */
+function getChartData(options = {}) {
+  const db = getDb();
+  const { whereClause, conditions, params } = buildPostsFilterClause(options);
+
+  // 1. Xu hướng theo ngày (Daily trend)
+  const trends = db.prepare(`
+    SELECT
+      SUBSTR(created_time, 1, 10) as date,
+      COUNT(*) as post_count,
+      COALESCE(SUM(likes_count), 0) as likes,
+      COALESCE(SUM(comments_count), 0) as comments,
+      COALESCE(SUM(shares_count), 0) as shares,
+      COALESCE(SUM(likes_count + comments_count + shares_count), 0) as total_engagements
+    FROM posts
+    ${whereClause}
+    GROUP BY date
+    ORDER BY date ASC
+  `).all(params);
+
+  // 2. Phân bố loại bài viết (ORIGINAL vs SHARED)
+  const postTypes = db.prepare(`
+    SELECT
+      COALESCE(post_type, 'ORIGINAL') as post_type,
+      COUNT(*) as count
+    FROM posts
+    ${whereClause}
+    GROUP BY post_type
+    ORDER BY count DESC
+  `).all(params);
+
+  // 3. Top người đăng có nhiều tương tác nhất
+  const pubConditions = [`publisher_status = 'FOUND'`, `publisher_name IS NOT NULL`, `TRIM(publisher_name) != ''`];
+  if (conditions.length > 0) {
+    pubConditions.push(...conditions);
+  }
+  const pubWhere = `WHERE ${pubConditions.join(' AND ')}`;
+
+  const topPublishers = db.prepare(`
+    SELECT
+      publisher_name,
+      COUNT(*) as post_count,
+      COALESCE(SUM(likes_count), 0) as likes,
+      COALESCE(SUM(comments_count), 0) as comments,
+      COALESCE(SUM(shares_count), 0) as shares,
+      COALESCE(SUM(likes_count + comments_count + shares_count), 0) as total_engagements
+    FROM posts
+    ${pubWhere}
+    GROUP BY publisher_name
+    ORDER BY total_engagements DESC, post_count DESC
+    LIMIT 7
+  `).all(params);
+
+  return {
+    trends,
+    postTypes,
+    topPublishers
+  };
+}
+
+/**
  * Xóa sạch toàn bộ dữ liệu bài viết và các đợt đồng bộ
  */
 function clearAllPostsData() {
@@ -695,8 +758,10 @@ module.exports = {
   getAllPostsForExport,
   getPostById,
   getStats,
+  getChartData,
   getPublishersList,
   getPublisherLeaderboard,
   createSyncBatch,
   getSyncBatches
 };
+

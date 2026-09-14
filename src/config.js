@@ -99,8 +99,34 @@ const config = {
     return process.env.TZ || 'Asia/Ho_Chi_Minh';
   },
 
+  // Cấu hình Tự động hóa & Telegram Bot
+  get AUTO_SYNC_ENABLED() {
+    return process.env.AUTO_SYNC_ENABLED === 'true';
+  },
+  get AUTO_SYNC_INTERVAL_HOURS() {
+    const val = parseFloat(process.env.AUTO_SYNC_INTERVAL_HOURS);
+    return !isNaN(val) && val > 0 ? val : 6;
+  },
+  get AUTO_SYNC_LOOKBACK_DAYS() {
+    const val = parseInt(process.env.AUTO_SYNC_LOOKBACK_DAYS, 10);
+    return !isNaN(val) && val > 0 ? val : 7;
+  },
+  get TELEGRAM_BOT_TOKEN() {
+    return (process.env.TELEGRAM_BOT_TOKEN || '').trim();
+  },
+  get TELEGRAM_CHAT_ID() {
+    return (process.env.TELEGRAM_CHAT_ID || '').trim();
+  },
+  get TELEGRAM_NOTIFY_ON_SYNC() {
+    return process.env.TELEGRAM_NOTIFY_ON_SYNC !== 'false';
+  },
+
   isApiConfigured() {
     return Boolean(this.FB_PAGE_ID && this.FB_PAGE_ACCESS_TOKEN);
+  },
+
+  isTelegramConfigured() {
+    return Boolean(this.TELEGRAM_BOT_TOKEN && this.TELEGRAM_CHAT_ID);
   },
 
   isProfilePresent() {

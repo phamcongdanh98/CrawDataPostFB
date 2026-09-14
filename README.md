@@ -1,10 +1,12 @@
 # 📊 HỆ THỐNG THỐNG KÊ BÀI VIẾT FANPAGE & NGƯỜI ĐĂNG (FACEBOOK FANPAGE PUBLISHER STAT)
 
 Ứng dụng tự động hóa chuyên nghiệp kết hợp **Meta Graph API** chính thức và **Playwright Chromium**:
-- 📈 **Tương tác chuẩn xác 100% từ Graph API**: Lấy trực tiếp Lượt thích / Cảm xúc (Likes/Reactions), Bình luận (Comments) và Lượt chia sẻ (Shares) từ máy chủ Meta.
+- 📈 **Tương tác chuẩn xác 100% từ Graph API & Playwright**: Lấy trực tiếp Lượt thích / Cảm xúc (Likes/Reactions), Bình luận (Comments) và Lượt chia sẻ (Shares).
 - 👤 **Bóc tách danh tính người đăng (Publisher)**: Tự động phát hiện Quản trị viên/Biên tập viên nào đã đăng bài (*"Đăng bởi / Published by..."*) trong nội bộ Fanpage.
-- 📊 **Dashboard Web trực quan**: 6 thẻ chỉ số KPI tự động tính toán đồng bộ theo bộ lọc, bảng dữ liệu phân trang, lọc theo Quản trị viên, tìm kiếm tức thì.
+- 📊 **Visual Charts Dashboard (Chart.js)**: Biểu đồ trực quan sinh động gồm Xu hướng tương tác theo ngày (Line), Tỷ lệ bài viết tự đăng vs chia sẻ (Doughnut), và Xếp hạng tương tác top Quản trị viên (Bar).
+- 🤖 **Auto-Sync Scheduler & Báo cáo Telegram Bot**: Lập lịch tự động quét ngầm định kỳ (1h, 3h, 6h, 12h, 24h) và tự động bắn báo cáo KPI chi tiết tới Telegram Bot / Kênh chat của bạn.
 - 📑 **Xuất Excel (.xlsx) chuyên nghiệp**: Tạo báo cáo bảng tính chuẩn doanh nghiệp với 2 Sheet (Chi tiết bài viết & Bảng xếp hạng Admin), tự động tạo link Canonical mở trực tiếp bài viết.
+
 
 ---
 
@@ -375,6 +377,18 @@ Mở trình duyệt bất kỳ và truy cập: 👉 **[http://localhost:3000](ht
 7. **Xuất báo cáo Doanh nghiệp:**
    * Bấm **"Xuất Excel"** để tải file `.xlsx` được thiết kế đẹp mắt, viền ô tinh tế, số liệu định dạng chuẩn, kèm **Sheet 2: Bảng xếp hạng năng suất Quản trị viên**.
    * Bấm **"Xuất CSV"** để lấy file UTF-8 mở ngay trên Excel không bị lỗi font tiếng Việt.
+8. **Phân tích Biểu đồ trực quan (Visual Charts Dashboard - MỚI):**
+   * **Biểu đồ Đường (Line Chart):** Xu hướng tương tác (Likes ❤️, Comments 💬, Shares 🔁) biến động theo từng ngày.
+   * **Biểu đồ Nhẫn (Doughnut Chart):** Tỷ lệ phân bố giữa Bài tự viết và Bài chia sẻ lại.
+   * **Biểu đồ Cột (Bar Chart):** Bảng xếp hạng tổng lượt tương tác của Top 7 Quản trị viên nổi bật nhất.
+   * *Đặc biệt:* Tự động vẽ lại theo thời gian thực (Real-time) mỗi khi bạn thay đổi bộ lọc ngày, đợt đồng bộ hay người đăng!
+9. **Tự động hóa & Báo cáo Telegram Bot (Auto-Sync & Bot - MỚI):**
+   * Nhấn nút **"🤖 Tự động hóa & Bot"** trên Header để mở bảng điều khiển.
+   * Bật **Chu trình tự động quét ngầm**: Chọn chu kỳ (1h, 3h, 6h, 12h, 24h) và số ngày quét lùi (1, 3, 7, 14, 30 ngày).
+   * Điền **Telegram Bot Token** (tạo qua `@BotFather`) và **Telegram Chat ID** (ID cá nhân hoặc Nhóm chat).
+   * Bấm **"🔔 Thử gửi Telegram"** để nhận ngay tin nhắn chào mừng kiểm tra kết nối.
+   * Bấm **"⚡ Chạy ngay"** để kích hoạt chu trình đồng bộ tức thì.
+   * Sau mỗi đợt quét tự động hoàn tất, hệ thống sẽ tự động gửi báo cáo KPI tổng kết trực tiếp vào kênh/nhóm Telegram của bạn!
 
 ---
 

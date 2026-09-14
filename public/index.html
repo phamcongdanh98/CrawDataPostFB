@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
   <!-- Toast Notification Container -->
@@ -38,6 +39,10 @@
 
         <div class="header-actions">
           <div class="btn-group-system">
+            <button id="btnOpenAutomationModal" class="btn btn-glass" style="border-color: rgba(56, 189, 248, 0.4); color: #38bdf8;" title="Cài đặt lịch tự động quét bài & gửi báo cáo Telegram Bot">
+              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+              <span id="headerAutoBadge">🤖 Tự động hóa & Bot</span>
+            </button>
             <button id="btnOpenSettingsModal" class="btn btn-glass" title="Cài đặt ID Fanpage và Access Token (lưu file .env)">
               <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
               <span>Cài đặt Fanpage & Token</span>
@@ -285,6 +290,66 @@
         </div>
         <div class="metric-hint">
           <button type="button" id="btnGoToPublishersTab" class="link-btn">Xem bảng xếp hạng ➜</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Khu Vực Biểu Đồ Trực Quan (Visual Charts Dashboard) -->
+    <section id="chartsSection" class="panel charts-panel">
+      <div class="charts-header">
+        <div class="charts-title-wrap">
+          <span class="charts-badge-icon">📊</span>
+          <div>
+            <h3 class="charts-main-title">Phân Tích Trực Quan & Xu Hướng Tương Tác</h3>
+            <p class="charts-subtitle">Biểu đồ trực quan tự động cập nhật đồng bộ theo từng bộ lọc ngày, đợt và người đăng</p>
+          </div>
+        </div>
+        <div class="charts-controls">
+          <button type="button" id="btnToggleCharts" class="btn btn-sm btn-glass" title="Thu gọn hoặc mở rộng khung biểu đồ">
+            <span id="chartsToggleText">🔼 Thu gọn</span>
+          </button>
+        </div>
+      </div>
+
+      <div id="chartsContainer" class="charts-grid">
+        <!-- Biểu đồ 1: Xu hướng tương tác qua thời gian -->
+        <div class="chart-card chart-card-wide">
+          <div class="chart-card-header">
+            <div class="chart-title-group">
+              <span class="chart-icon">📈</span>
+              <span class="chart-title">Xu hướng tương tác theo ngày (Likes, Comments, Shares)</span>
+            </div>
+            <span class="chart-tag" id="chartTrendPeriod">Thời gian thực</span>
+          </div>
+          <div class="chart-canvas-wrap">
+            <canvas id="trendChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Biểu đồ 2: Tỷ lệ phân bố bài viết -->
+        <div class="chart-card chart-card-doughnut">
+          <div class="chart-card-header">
+            <div class="chart-title-group">
+              <span class="chart-icon">🍩</span>
+              <span class="chart-title">Tỷ lệ loại bài viết</span>
+            </div>
+          </div>
+          <div class="chart-canvas-wrap chart-doughnut-wrap">
+            <canvas id="typeChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Biểu đồ 3: Xếp hạng top quản trị viên -->
+        <div class="chart-card chart-card-medium">
+          <div class="chart-card-header">
+            <div class="chart-title-group">
+              <span class="chart-icon">🏆</span>
+              <span class="chart-title">Top Quản trị viên (Tổng tương tác)</span>
+            </div>
+          </div>
+          <div class="chart-canvas-wrap">
+            <canvas id="publisherChart"></canvas>
+          </div>
         </div>
       </div>
     </section>
@@ -738,6 +803,129 @@
           <span id="clearDataSpinner" class="spinner-sm" style="display: none;"></span>
           <span>Đồng ý xóa sạch</span>
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Cấu hình Tự động hóa & Telegram Bot -->
+  <div id="automationModal" class="modal-overlay" style="display: none;">
+    <div class="modal-card" style="max-width: 620px;">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <span class="modal-icon" style="color: #38bdf8;">🤖</span>
+          <div>
+            <h3>Tự Động Hóa & Thông Báo Telegram Bot</h3>
+            <p class="text-muted" style="font-size: 0.8rem; margin: 0;">Lập lịch quét ngầm định kỳ và tự động gửi báo cáo KPI tới Telegram</p>
+          </div>
+        </div>
+        <button id="btnCloseAutomationModal" class="btn-close">✕</button>
+      </div>
+      <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+        <!-- Phần 1: Trạng thái Scheduler -->
+        <div class="auto-status-card" id="autoStatusCard" style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: var(--radius-sm); padding: 1rem; margin-bottom: 1.25rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span id="autoStatusDot" class="status-dot" style="background: #94a3b8;"></span>
+              <strong id="autoStatusTitle" style="font-size: 0.95rem; color: var(--text-primary);">Chế độ tự động đang tắt</strong>
+            </div>
+            <span id="autoNextRunBadge" class="chip chip-threads" style="font-size: 0.75rem; background: rgba(56, 189, 248, 0.1); border-color: rgba(56, 189, 248, 0.3); color: #38bdf8;">Chưa lên lịch</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.8rem; color: var(--text-secondary);">
+            <div>Lần quét gần nhất: <span id="autoLastRunTime" style="color: var(--text-primary); font-weight: 500;">Chưa chạy</span></div>
+            <div>Trạng thái lần cuối: <span id="autoLastRunStatus" style="color: var(--text-primary); font-weight: 500;">-</span></div>
+          </div>
+        </div>
+
+        <!-- Phần 2: Cài đặt lịch quét tự động -->
+        <h4 style="font-size: 0.9rem; color: #38bdf8; margin: 0 0 0.75rem 0; display: flex; align-items: center; gap: 0.4rem;">
+          <span>⏱️</span> 1. Lập lịch tự động đồng bộ (Auto-Sync)
+        </h4>
+
+        <div style="display: flex; flex-direction: column; gap: 0.85rem; margin-bottom: 1.25rem;">
+          <div class="control-group">
+            <label class="toggle-switch-label" style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer;">
+              <input type="checkbox" id="autoSyncEnabled" class="toggle-switch-input">
+              <span class="toggle-switch-slider"></span>
+              <span class="toggle-text" style="font-weight: 600; color: var(--text-primary);">Bật chu trình tự động quét ngầm</span>
+            </label>
+            <small class="form-hint" style="margin-left: 3.5rem;">Hệ thống sẽ chạy ngầm lấy bài viết mới và bóc tách tác giả/tương tác theo định kỳ.</small>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+            <div class="control-group">
+              <label for="autoIntervalHours" class="form-label">Chu kỳ quét lặp lại:</label>
+              <select id="autoIntervalHours" class="select-full" style="padding: 0.55rem 0.75rem; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); width: 100%;">
+                <option value="1">Mỗi 1 giờ / lần</option>
+                <option value="2">Mỗi 2 giờ / lần</option>
+                <option value="3">Mỗi 3 giờ / lần</option>
+                <option value="6" selected>Mỗi 6 giờ / lần (Khuyên dùng)</option>
+                <option value="12">Mỗi 12 giờ / lần</option>
+                <option value="24">Mỗi 24 giờ / lần (Hàng ngày)</option>
+              </select>
+            </div>
+
+            <div class="control-group">
+              <label for="autoLookbackDays" class="form-label">Khoảng ngày quét lùi:</label>
+              <select id="autoLookbackDays" class="select-full" style="padding: 0.55rem 0.75rem; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); width: 100%;">
+                <option value="1">1 ngày vừa qua</option>
+                <option value="3">3 ngày vừa qua</option>
+                <option value="7" selected>7 ngày vừa qua (Khuyên dùng)</option>
+                <option value="14">14 ngày vừa qua</option>
+                <option value="30">30 ngày vừa qua</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Phần 3: Cài đặt Telegram Bot -->
+        <h4 style="font-size: 0.9rem; color: #38bdf8; margin: 1rem 0 0.75rem 0; display: flex; align-items: center; gap: 0.4rem;">
+          <span>📢</span> 2. Cấu hình Telegram Bot nhận báo cáo
+        </h4>
+
+        <div style="display: flex; flex-direction: column; gap: 0.85rem; margin-bottom: 1rem;">
+          <div class="control-group">
+            <label for="telegramBotToken" class="form-label">Telegram Bot Token:</label>
+            <input type="password" id="telegramBotToken" placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ..." class="input-full" autocomplete="off">
+            <small class="form-hint">Nhắn tin cho <a href="https://t.me/BotFather" target="_blank" style="color: #38bdf8; text-decoration: underline;">@BotFather</a> trên Telegram để tạo Bot và lấy Token.</small>
+          </div>
+
+          <div class="control-group">
+            <label for="telegramChatId" class="form-label">Telegram Chat ID (Cá nhân hoặc Nhóm):</label>
+            <input type="text" id="telegramChatId" placeholder="Ví dụ: 987654321 hoặc -1001234567890" class="input-full">
+            <small class="form-hint">ID cá nhân của bạn hoặc ID của Group/Channel (thêm Bot vào group làm Admin rồi lấy Chat ID).</small>
+          </div>
+
+          <div class="control-group">
+            <label class="toggle-switch-label" style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer;">
+              <input type="checkbox" id="telegramNotifyOnSync" class="toggle-switch-input" checked>
+              <span class="toggle-switch-slider"></span>
+              <span class="toggle-text" style="font-size: 0.85rem; color: var(--text-primary);">Tự động gửi tin nhắn báo cáo KPI mỗi khi hoàn thành đợt quét</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Result Box -->
+        <div id="automationResultBox" class="test-result-box" style="display: none; margin-top: 0.75rem;"></div>
+      </div>
+
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+        <div style="display: flex; gap: 0.5rem;">
+          <button type="button" id="btnTestTelegram" class="btn btn-secondary" style="border: 1px solid rgba(56, 189, 248, 0.4); color: #38bdf8;" title="Gửi một tin nhắn kiểm tra kết nối tới Telegram">
+            <span id="testTeleSpinner" class="spinner-sm" style="display: none;"></span>
+            <span>🔔 Thử gửi Telegram</span>
+          </button>
+          <button type="button" id="btnTriggerAutoNow" class="btn btn-secondary" style="border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399;" title="Chạy một lượt đồng bộ tự động ngay lập tức">
+            <span id="triggerAutoSpinner" class="spinner-sm" style="display: none;"></span>
+            <span>⚡ Chạy ngay</span>
+          </button>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+          <button type="button" id="btnCancelAutomationModal" class="btn btn-secondary">Đóng</button>
+          <button type="button" id="btnSaveAutomation" class="btn btn-primary">
+            <span id="saveAutoSpinner" class="spinner-sm" style="display: none;"></span>
+            <span>💾 Lưu cấu hình (.env)</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>

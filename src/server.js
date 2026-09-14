@@ -8,6 +8,8 @@ const { isValidDateFormat, isDateRangeValid, formatVNDate, escapeCsvField, trunc
 const { getBrowserContext, closeBrowserContext, checkPageLogin } = require('./facebook-browser');
 const { detectPublisher } = require('./publisher-detector');
 const { resolvePageAccessToken } = require('./token-resolver');
+const { testTelegramConnection } = require('./telegram-service');
+const autoSyncScheduler = require('./auto-sync-scheduler');
 
 const app = express();
 
@@ -241,6 +243,25 @@ app.get('/api/stats', (req, res) => {
     res.json(stats);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * 5.1 Dữ liệu biểu đồ trực quan (Chart.js)
+ */
+app.get('/api/chart-data', (req, res) => {
+  try {
+    let { since, until, batchId, publisher, status, postType, search, minLikes, minComments, minShares } = req.query;
+    if (since) since = normalizeDateStr(since) || since;
+    if (until) until = normalizeDateStr(until) || until;
+
+    const chartData = db.getChartData({ since, until, batchId, publisher, status, postType, search, minLikes, minComments, minShares });
+    res.json({
+      ok: true,
+      ...chartData
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -674,6 +695,108 @@ app.post('/api/posts/:id/rescan', async (req, res) => {
   }
 });
 
+/**
+ * 14. Tự động hóa & Telegram Bot API
+ */
+app.get('/api/automation/status', (req, res) => {
+  try {
+    res.json({
+      ok: true,
+      ...autoSyncScheduler.getStatus()
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/automation/config', (req, res) => {
+  try {
+    const {
+      enabled,
+      intervalHours,
+      lookbackDays,
+      telegramToken,
+      telegramChatId,
+      telegramNotify
+    } = req.body;
+
+    const updates = {};
+    if (enabled !== undefined) {
+      updates.AUTO_SYNC_ENABLED = enabled ? 'true' : 'false';
+    }
+    if (intervalHours !== undefined) {
+      const parsedHours = parseFloat(intervalHours);
+      if (!isNaN(parsedHours) && parsedHours > 0) {
+        updates.AUTO_SYNC_INTERVAL_HOURS = parsedHours;
+      }
+    }
+    if (lookbackDays !== undefined) {
+      const parsedDays = parseInt(lookbackDays, 10);
+      if (!isNaN(parsedDays) && parsedDays > 0) {
+        updates.AUTO_SYNC_LOOKBACK_DAYS = parsedDays;
+      }
+    }
+    if (telegramToken !== undefined) {
+      updates.TELEGRAM_BOT_TOKEN = telegramToken.trim();
+    }
+    if (telegramChatId !== undefined) {
+      updates.TELEGRAM_CHAT_ID = telegramChatId.trim();
+    }
+    if (telegramNotify !== undefined) {
+      updates.TELEGRAM_NOTIFY_ON_SYNC = telegramNotify ? 'true' : 'false';
+    }
+
+    config.updateEnvConfig(updates);
+    autoSyncScheduler.restartScheduler();
+
+    res.json({
+      ok: true,
+      message: 'Đã lưu cấu hình Tự động hóa & Telegram Bot thành công!',
+      status: autoSyncScheduler.getStatus()
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/automation/test-telegram', async (req, res) => {
+  try {
+    const token = (req.body.token || config.TELEGRAM_BOT_TOKEN || '').trim();
+    const chatId = (req.body.chatId || config.TELEGRAM_CHAT_ID || '').trim();
+
+    if (!token || !chatId) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Vui lòng nhập cả Telegram Bot Token và Chat ID để kiểm tra.'
+      });
+    }
+
+    const testRes = await testTelegramConnection(token, chatId);
+    res.json(testRes);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/automation/run-now', async (req, res) => {
+  try {
+    if (autoSyncScheduler.getStatus().isRunning) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Tiến trình tự động hóa đang chạy, vui lòng đợi.'
+      });
+    }
+    // Kích hoạt chạy ngầm
+    autoSyncScheduler.executeScheduledSync(true);
+    res.json({
+      ok: true,
+      message: 'Đã kích hoạt chu trình đồng bộ tự động ngay lập tức!'
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 let server = null;
 if (require.main === module) {
   server = app.listen(config.PORT, () => {
@@ -681,10 +804,14 @@ if (require.main === module) {
     console.log(`🚀 Fanpage Publisher Stat Server đang chạy tại:`);
     console.log(`👉 http://localhost:${config.PORT}`);
     console.log(`======================================================\n`);
+
+    // Khởi động scheduler hẹn giờ tự động
+    autoSyncScheduler.startScheduler();
   });
 
   async function shutdown() {
     console.log('\n[Server] Đang tắt máy chủ...');
+    autoSyncScheduler.stopScheduler();
     try {
       await closeBrowserContext();
       console.log('[Server] Đã giải phóng tài nguyên Chromium Playwright.');
@@ -710,3 +837,4 @@ if (require.main === module) {
 db.getDb();
 
 module.exports = { app, server };
+

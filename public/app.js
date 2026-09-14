@@ -628,6 +628,11 @@ async function fetchStats() {
     // Cập nhật dropdown lọc người đăng và bảng người đăng
     populatePublisherFilterDropdown(data.publishers || []);
     renderPublisherTable(data.publishers || []);
+
+    // Tự động vẽ lại các biểu đồ trực quan theo bộ lọc
+    if (typeof fetchChartData === 'function') {
+      fetchChartData();
+    }
   } catch (err) {
     console.error('Lỗi khi tải số liệu thống kê:', err);
   }
@@ -1237,6 +1242,10 @@ function renderPublisherTable(publishers) {
     const initial = p.publisher_name.charAt(0).toUpperCase();
 
     const tr = document.createElement('tr');
+    const postCount = p.post_count !== undefined ? p.post_count : (p.count || 0);
+    const origCount = p.original_count || 0;
+    const sharedCount = p.shared_count || 0;
+
     tr.className = isSelected ? 'row-selected' : '';
     tr.innerHTML = `
       <td style="text-align: center;">
@@ -1248,13 +1257,13 @@ function renderPublisherTable(publishers) {
           <div>
             <strong style="color: #fff; font-size: 0.9rem;">${escapeHtml(p.publisher_name)}</strong>
             <div style="font-size: 0.76rem; color: var(--text-dim); margin-top: 2px;">
-              📝 ${p.original_count} tự đăng • 🔄 ${p.shared_count} chia sẻ
+              📝 ${origCount} tự đăng • 🔄 ${sharedCount} chia sẻ
             </div>
           </div>
         </div>
       </td>
       <td style="text-align: center;">
-        <span class="badge badge-success" style="font-size: 0.82rem; font-weight: 700;">${p.post_count.toLocaleString()} bài</span>
+        <span class="badge badge-success" style="font-size: 0.82rem; font-weight: 700;">${postCount.toLocaleString()} bài</span>
       </td>
       <td style="text-align: center; color: #f87171; font-weight: 600;">${(p.total_likes || 0).toLocaleString()}</td>
       <td style="text-align: center; color: #60a5fa; font-weight: 600;">${(p.total_comments || 0).toLocaleString()}</td>
@@ -2166,6 +2175,592 @@ if (btnConfirmClearData) {
 }
 
 // ==========================================================================
+// VISUAL CHARTS DASHBOARD (CHART.JS MODULE)
+// ==========================================================================
+
+let trendChartInstance = null;
+let typeChartInstance = null;
+let publisherChartInstance = null;
+
+const btnToggleCharts = document.getElementById('btnToggleCharts');
+const chartsToggleText = document.getElementById('chartsToggleText');
+const chartsContainer = document.getElementById('chartsContainer');
+
+if (btnToggleCharts && chartsContainer) {
+  btnToggleCharts.addEventListener('click', () => {
+    const isHidden = chartsContainer.style.display === 'none';
+    if (isHidden) {
+      chartsContainer.style.display = 'grid';
+      if (chartsToggleText) chartsToggleText.textContent = '🔼 Thu gọn';
+    } else {
+      chartsContainer.style.display = 'none';
+      if (chartsToggleText) chartsToggleText.textContent = '🔽 Mở rộng';
+    }
+  });
+}
+
+/**
+ * Tải dữ liệu và vẽ lại cả 3 biểu đồ trực quan
+ */
+async function fetchChartData() {
+  const trendCanvas = document.getElementById('trendChart');
+  if (!trendCanvas || typeof Chart === 'undefined') return;
+
+  try {
+    const params = new URLSearchParams();
+    if (state.batchId && state.batchId !== 'ALL') params.set('batchId', state.batchId);
+    if (state.since) params.set('since', state.since);
+    if (state.until) params.set('until', state.until);
+    if (state.publisher) params.set('publisher', state.publisher);
+    if (state.status && state.status !== 'ALL') params.set('status', state.status);
+    if (state.postType && state.postType !== 'ALL') params.set('postType', state.postType);
+    if (state.search && state.search.trim()) params.set('search', state.search.trim());
+    if (state.minLikes) params.set('minLikes', state.minLikes);
+
+    const queryString = params.toString();
+    const url = queryString ? `/api/chart-data?${queryString}` : '/api/chart-data';
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (!data.ok) return;
+
+    renderTrendChart(data.trends || []);
+    renderTypeChart(data.postTypes || []);
+    renderPublisherChart(data.topPublishers || []);
+
+    const periodEl = document.getElementById('chartTrendPeriod');
+    if (periodEl) {
+      if (data.trends && data.trends.length > 0) {
+        periodEl.textContent = `${data.trends.length} ngày ghi nhận`;
+      } else {
+        periodEl.textContent = 'Chưa có số liệu';
+      }
+    }
+  } catch (err) {
+    console.warn('[Chart] Lỗi cập nhật dữ liệu biểu đồ:', err);
+  }
+}
+
+/**
+ * Biểu đồ 1: Đường xu hướng tương tác theo ngày (Line / Smooth Area)
+ */
+function renderTrendChart(trends = []) {
+  const canvas = document.getElementById('trendChart');
+  if (!canvas || typeof Chart === 'undefined') return;
+
+  if (trendChartInstance) {
+    trendChartInstance.destroy();
+    trendChartInstance = null;
+  }
+
+  const labels = trends.map(t => {
+    // Format YYYY-MM-DD sang DD/MM
+    const parts = (t.date || '').split('-');
+    return parts.length === 3 ? `${parts[2]}/${parts[1]}` : t.date;
+  });
+  const likesData = trends.map(t => t.likes || 0);
+  const commentsData = trends.map(t => t.comments || 0);
+  const sharesData = trends.map(t => t.shares || 0);
+
+  const ctx = canvas.getContext('2d');
+  trendChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: '❤️ Thích',
+          data: likesData,
+          borderColor: '#f43f5e',
+          backgroundColor: 'rgba(244, 63, 94, 0.1)',
+          fill: true,
+          tension: 0.35,
+          borderWidth: 2,
+          pointRadius: 3,
+          pointHoverRadius: 6,
+          pointBackgroundColor: '#f43f5e'
+        },
+        {
+          label: '💬 Bình luận',
+          data: commentsData,
+          borderColor: '#38bdf8',
+          backgroundColor: 'transparent',
+          tension: 0.35,
+          borderWidth: 2,
+          pointRadius: 3,
+          pointHoverRadius: 6,
+          pointBackgroundColor: '#38bdf8'
+        },
+        {
+          label: '🔁 Chia sẻ',
+          data: sharesData,
+          borderColor: '#34d399',
+          backgroundColor: 'transparent',
+          tension: 0.35,
+          borderWidth: 2,
+          pointRadius: 3,
+          pointHoverRadius: 6,
+          pointBackgroundColor: '#34d399'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: {
+        mode: 'index',
+        intersect: false
+      },
+      plugins: {
+        legend: {
+          position: 'top',
+          labels: {
+            color: '#cbd5e1',
+            boxWidth: 12,
+            font: { family: 'Inter', size: 11 }
+          }
+        },
+        tooltip: {
+          backgroundColor: 'rgba(15, 23, 42, 0.95)',
+          titleColor: '#f8fafc',
+          bodyColor: '#cbd5e1',
+          borderColor: 'rgba(56, 189, 248, 0.3)',
+          borderWidth: 1,
+          padding: 8,
+          cornerRadius: 6
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: 'rgba(255, 255, 255, 0.05)' },
+          ticks: { color: '#94a3b8', font: { family: 'Inter', size: 10 } }
+        },
+        y: {
+          beginAtZero: true,
+          grid: { color: 'rgba(255, 255, 255, 0.05)' },
+          ticks: { color: '#94a3b8', font: { family: 'Inter', size: 10 } }
+        }
+      }
+    }
+  });
+}
+
+/**
+ * Biểu đồ 2: Tỷ lệ phân bố loại bài viết (Doughnut Chart)
+ */
+function renderTypeChart(postTypes = []) {
+  const canvas = document.getElementById('typeChart');
+  if (!canvas || typeof Chart === 'undefined') return;
+
+  if (typeChartInstance) {
+    typeChartInstance.destroy();
+    typeChartInstance = null;
+  }
+
+  let origCount = 0;
+  let sharedCount = 0;
+  postTypes.forEach(p => {
+    if (p.post_type === 'SHARED') sharedCount += p.count;
+    else origCount += p.count;
+  });
+
+  const total = origCount + sharedCount;
+  const labels = ['Bài tự đăng', 'Bài chia sẻ'];
+  const dataValues = [origCount, sharedCount];
+
+  const ctx = canvas.getContext('2d');
+  typeChartInstance = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [
+        {
+          data: total > 0 ? dataValues : [1],
+          backgroundColor: total > 0 ? ['#3b82f6', '#a855f7'] : ['rgba(148, 163, 184, 0.2)'],
+          borderColor: 'rgba(15, 23, 42, 0.8)',
+          borderWidth: 3,
+          hoverOffset: 4
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '68%',
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            color: '#cbd5e1',
+            boxWidth: 12,
+            font: { family: 'Inter', size: 11 },
+            padding: 12
+          }
+        },
+        tooltip: {
+          callbacks: {
+            label: function (context) {
+              if (total === 0) return ' Chưa có dữ liệu bài viết';
+              const val = context.raw || 0;
+              const pct = Math.round((val / total) * 100);
+              return ` ${context.label}: ${val} bài (${pct}%)`;
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+/**
+ * Biểu đồ 3: Xếp hạng top quản trị viên (Horizontal Bar Chart)
+ */
+function renderPublisherChart(publishers = []) {
+  const canvas = document.getElementById('publisherChart');
+  if (!canvas || typeof Chart === 'undefined') return;
+
+  if (publisherChartInstance) {
+    publisherChartInstance.destroy();
+    publisherChartInstance = null;
+  }
+
+  const validPubs = (publishers || []).slice(0, 7);
+  const labels = validPubs.map(p => p.publisher_name || 'Khác');
+  const engagements = validPubs.map(p => p.total_engagements || 0);
+
+  const ctx = canvas.getContext('2d');
+  publisherChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Tổng tương tác',
+          data: engagements,
+          backgroundColor: 'rgba(99, 102, 241, 0.75)',
+          borderColor: '#818cf8',
+          borderWidth: 1,
+          borderRadius: 6,
+          hoverBackgroundColor: '#6366f1'
+        }
+      ]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(15, 23, 42, 0.95)',
+          titleColor: '#f8fafc',
+          bodyColor: '#cbd5e1',
+          borderColor: 'rgba(99, 102, 241, 0.4)',
+          borderWidth: 1,
+          callbacks: {
+            afterLabel: function (context) {
+              const pub = validPubs[context.dataIndex];
+              return pub ? `Số lượng: ${pub.post_count} bài đăng` : '';
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          beginAtZero: true,
+          grid: { color: 'rgba(255, 255, 255, 0.05)' },
+          ticks: { color: '#94a3b8', font: { family: 'Inter', size: 10 } }
+        },
+        y: {
+          grid: { display: false },
+          ticks: {
+            color: '#e2e8f0',
+            font: { family: 'Inter', size: 11, weight: '500' }
+          }
+        }
+      }
+    }
+  });
+}
+
+// ==========================================================================
+// AUTOMATION & TELEGRAM BOT MODAL
+// ==========================================================================
+
+const automationModal = document.getElementById('automationModal');
+const btnOpenAutomationModal = document.getElementById('btnOpenAutomationModal');
+const btnCloseAutomationModal = document.getElementById('btnCloseAutomationModal');
+const btnCancelAutomationModal = document.getElementById('btnCancelAutomationModal');
+const btnSaveAutomation = document.getElementById('btnSaveAutomation');
+const btnTestTelegram = document.getElementById('btnTestTelegram');
+const btnTriggerAutoNow = document.getElementById('btnTriggerAutoNow');
+
+const autoSyncEnabled = document.getElementById('autoSyncEnabled');
+const autoIntervalHours = document.getElementById('autoIntervalHours');
+const autoLookbackDays = document.getElementById('autoLookbackDays');
+const telegramBotToken = document.getElementById('telegramBotToken');
+const telegramChatId = document.getElementById('telegramChatId');
+const telegramNotifyOnSync = document.getElementById('telegramNotifyOnSync');
+
+const autoStatusDot = document.getElementById('autoStatusDot');
+const autoStatusTitle = document.getElementById('autoStatusTitle');
+const autoNextRunBadge = document.getElementById('autoNextRunBadge');
+const autoLastRunTime = document.getElementById('autoLastRunTime');
+const autoLastRunStatus = document.getElementById('autoLastRunStatus');
+const automationResultBox = document.getElementById('automationResultBox');
+const headerAutoBadge = document.getElementById('headerAutoBadge');
+
+function openAutomationModal() {
+  if (automationModal) {
+    automationModal.style.display = 'flex';
+    fetchAutomationStatus();
+  }
+}
+
+function closeAutomationModal() {
+  if (automationModal) automationModal.style.display = 'none';
+}
+
+if (btnOpenAutomationModal) btnOpenAutomationModal.addEventListener('click', openAutomationModal);
+if (btnCloseAutomationModal) btnCloseAutomationModal.addEventListener('click', closeAutomationModal);
+if (btnCancelAutomationModal) btnCancelAutomationModal.addEventListener('click', closeAutomationModal);
+if (automationModal) {
+  automationModal.addEventListener('click', (e) => {
+    if (e.target === automationModal) closeAutomationModal();
+  });
+}
+
+/**
+ * Tải thông tin trạng thái Scheduler & Telegram Bot
+ */
+async function fetchAutomationStatus() {
+  try {
+    const res = await fetch('/api/automation/status');
+    const data = await res.json();
+
+    if (!data.ok) return;
+
+    // Cập nhật form
+    if (autoSyncEnabled) autoSyncEnabled.checked = !!data.enabled;
+    if (autoIntervalHours) autoIntervalHours.value = String(data.intervalHours || 6);
+    if (autoLookbackDays) autoLookbackDays.value = String(data.lookbackDays || 7);
+    if (telegramNotifyOnSync) telegramNotifyOnSync.checked = data.telegramNotify !== false;
+
+    // Cập nhật header badge
+    if (headerAutoBadge) {
+      if (data.enabled) {
+        headerAutoBadge.innerHTML = '🤖 Tự động: <span style="color: #34d399; font-weight: 700;">BẬT</span>';
+      } else {
+        headerAutoBadge.innerHTML = '🤖 Tự động hóa & Bot';
+      }
+    }
+
+    // Cập nhật status card trong modal
+    if (autoStatusDot) {
+      autoStatusDot.style.background = data.enabled ? '#10b981' : '#94a3b8';
+      if (data.isRunning) autoStatusDot.style.background = '#f59e0b';
+    }
+    if (autoStatusTitle) {
+      if (data.isRunning) {
+        autoStatusTitle.textContent = 'Đang trong tiến trình quét tự động...';
+        autoStatusTitle.style.color = '#f59e0b';
+      } else if (data.enabled) {
+        autoStatusTitle.textContent = `Chế độ tự động đang BẬT (Mỗi ${data.intervalHours}h)`;
+        autoStatusTitle.style.color = '#34d399';
+      } else {
+        autoStatusTitle.textContent = 'Chế độ tự động đang TẮT';
+        autoStatusTitle.style.color = 'var(--text-primary)';
+      }
+    }
+    if (autoNextRunBadge) {
+      if (data.enabled && data.nextRunTime) {
+        const d = new Date(data.nextRunTime);
+        const timeStr = d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+        const dateStr = d.toLocaleDateString('vi-VN');
+        autoNextRunBadge.textContent = `Lần tới: ${timeStr} ${dateStr}`;
+      } else {
+        autoNextRunBadge.textContent = 'Chưa lên lịch';
+      }
+    }
+    if (autoLastRunTime) {
+      if (data.lastRunTime) {
+        autoLastRunTime.textContent = new Date(data.lastRunTime).toLocaleString('vi-VN');
+      } else {
+        autoLastRunTime.textContent = 'Chưa chạy';
+      }
+    }
+    if (autoLastRunStatus) {
+      if (data.lastResult) {
+        if (data.lastResult.ok) {
+          autoLastRunStatus.innerHTML = '<span style="color: #34d399;">✅ Thành công</span>';
+        } else {
+          autoLastRunStatus.innerHTML = `<span style="color: #f87171;">❌ ${data.lastResult.error || 'Lỗi'}</span>`;
+        }
+      } else {
+        autoLastRunStatus.textContent = '-';
+      }
+    }
+  } catch (err) {
+    console.warn('[Automation] Lỗi lấy status:', err);
+  }
+}
+
+// Lưu cấu hình Tự động hóa & Telegram
+if (btnSaveAutomation) {
+  btnSaveAutomation.addEventListener('click', async () => {
+    const spinner = document.getElementById('saveAutoSpinner');
+    btnSaveAutomation.disabled = true;
+    if (spinner) spinner.style.display = 'inline-block';
+
+    try {
+      const payload = {
+        enabled: autoSyncEnabled ? autoSyncEnabled.checked : false,
+        intervalHours: autoIntervalHours ? autoIntervalHours.value : 6,
+        lookbackDays: autoLookbackDays ? autoLookbackDays.value : 7,
+        telegramNotify: telegramNotifyOnSync ? telegramNotifyOnSync.checked : true
+      };
+
+      if (telegramBotToken && telegramBotToken.value.trim()) {
+        payload.telegramToken = telegramBotToken.value.trim();
+      }
+      if (telegramChatId && telegramChatId.value.trim()) {
+        payload.telegramChatId = telegramChatId.value.trim();
+      }
+
+      const res = await fetch('/api/automation/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        showToast({
+          type: 'success',
+          title: 'Lưu cấu hình thành công',
+          message: data.message || 'Cấu hình Tự động hóa & Telegram đã được lưu vào .env'
+        });
+        fetchAutomationStatus();
+        closeAutomationModal();
+      } else {
+        showToast({
+          type: 'error',
+          title: 'Lỗi lưu cấu hình',
+          message: data.error || 'Không thể lưu cấu hình'
+        });
+      }
+    } catch (err) {
+      showToast({ type: 'error', title: 'Lỗi kết nối', message: err.message });
+    } finally {
+      btnSaveAutomation.disabled = false;
+      if (spinner) spinner.style.display = 'none';
+    }
+  });
+}
+
+// Thử nghiệm gửi Telegram
+if (btnTestTelegram) {
+  btnTestTelegram.addEventListener('click', async () => {
+    const spinner = document.getElementById('testTeleSpinner');
+    btnTestTelegram.disabled = true;
+    if (spinner) spinner.style.display = 'inline-block';
+    if (automationResultBox) {
+      automationResultBox.style.display = 'block';
+      automationResultBox.innerHTML = '<span class="spinner-sm"></span> Đang gửi tin nhắn kiểm tra tới Telegram API...';
+    }
+
+    try {
+      const token = telegramBotToken ? telegramBotToken.value.trim() : '';
+      const chatId = telegramChatId ? telegramChatId.value.trim() : '';
+
+      const res = await fetch('/api/automation/test-telegram', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, chatId })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        showToast({
+          type: 'success',
+          title: 'Kết nối Telegram thành công!',
+          message: 'Đã gửi tin nhắn thử nghiệm tới nhóm/kênh của bạn.'
+        });
+        if (automationResultBox) {
+          automationResultBox.innerHTML = `
+            <div style="color: #34d399; font-weight: 600; margin-bottom: 0.25rem;">
+              ✅ KẾT NỐI TELEGRAM BOT THÀNH CÔNG!
+            </div>
+            <div style="font-size: 0.8rem; color: var(--text-secondary);">
+              Tin nhắn thử nghiệm đã xuất hiện trên ứng dụng Telegram của bạn.
+            </div>
+          `;
+        }
+      } else {
+        showToast({
+          type: 'error',
+          title: 'Không thể kết nối Telegram',
+          message: data.error || 'Vui lòng kiểm tra lại Bot Token và Chat ID'
+        });
+        if (automationResultBox) {
+          automationResultBox.innerHTML = `
+            <div style="color: #f87171; font-weight: 600; margin-bottom: 0.25rem;">
+              ❌ LỖI KẾT NỐI TELEGRAM
+            </div>
+            <div style="font-size: 0.8rem; color: #fca5a5;">
+              ${escapeHtml(data.error || 'Token hoặc Chat ID không chính xác.')}
+            </div>
+          `;
+        }
+      }
+    } catch (err) {
+      showToast({ type: 'error', title: 'Lỗi mạng', message: err.message });
+      if (automationResultBox) {
+        automationResultBox.innerHTML = `<span style="color: #f87171;">❌ ${escapeHtml(err.message)}</span>`;
+      }
+    } finally {
+      btnTestTelegram.disabled = false;
+      if (spinner) spinner.style.display = 'none';
+    }
+  });
+}
+
+// Chạy chu trình tự động ngay lập tức
+if (btnTriggerAutoNow) {
+  btnTriggerAutoNow.addEventListener('click', async () => {
+    const spinner = document.getElementById('triggerAutoSpinner');
+    btnTriggerAutoNow.disabled = true;
+    if (spinner) spinner.style.display = 'inline-block';
+
+    try {
+      const res = await fetch('/api/automation/run-now', { method: 'POST' });
+      const data = await res.json();
+
+      if (res.ok && data.ok) {
+        showToast({
+          type: 'success',
+          title: 'Đã kích hoạt đồng bộ',
+          message: 'Hệ thống đang chạy ngầm lấy bài viết và trích xuất dữ liệu.'
+        });
+        closeAutomationModal();
+        startJobPolling();
+      } else {
+        showToast({
+          type: 'warning',
+          title: 'Không thể kích hoạt',
+          message: data.error || 'Hệ thống đang bận'
+        });
+      }
+    } catch (err) {
+      showToast({ type: 'error', title: 'Lỗi kết nối', message: err.message });
+    } finally {
+      btnTriggerAutoNow.disabled = false;
+      if (spinner) spinner.style.display = 'none';
+    }
+  });
+}
+
+// ==========================================================================
 // KHỞI CHẠY ỨNG DỤNG (INITIALIZATION)
 // ==========================================================================
 window.addEventListener('DOMContentLoaded', () => {
@@ -2175,9 +2770,11 @@ window.addEventListener('DOMContentLoaded', () => {
   fetchStats();
   fetchPosts();
   fetchBatches();
+  fetchAutomationStatus();
 
   // Kiểm tra nếu có job đang chạy ngầm từ trước
   fetch('/api/status').then(r => r.json()).then(j => {
     if (j.isRunning) startJobPolling();
   }).catch(() => {});
 });
+

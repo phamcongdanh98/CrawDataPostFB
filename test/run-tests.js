@@ -431,6 +431,93 @@ async function runAllTests() {
     assert.ok(json.error);
   });
 
+  // 7. CHART DATA & VISUAL DASHBOARD
+  describe('7. Thống kê biểu đồ trực quan (Chart Data Analytics)');
+  await test('db.getChartData trả về cấu trúc trends, postTypes, topPublishers', () => {
+    const chartData = db.getChartData();
+    assert.ok(chartData, 'chartData phải tồn tại');
+    assert.ok(Array.isArray(chartData.trends), 'trends phải là mảng');
+    assert.ok(Array.isArray(chartData.postTypes), 'postTypes phải là mảng');
+    assert.ok(Array.isArray(chartData.topPublishers), 'topPublishers phải là mảng');
+  });
+
+  await test('GET /api/chart-data trả về dữ liệu biểu đồ hợp lệ', async () => {
+    const { status, data } = await fetchJson('/api/chart-data');
+    assert.strictEqual(status, 200);
+    assert.strictEqual(data.ok, true);
+    assert.ok(Array.isArray(data.trends));
+    assert.ok(Array.isArray(data.postTypes));
+    assert.ok(Array.isArray(data.topPublishers));
+  });
+
+  // 8. TELEGRAM SERVICE & AUTO-SYNC SCHEDULER
+  describe('8. Tự động hóa & Telegram Bot API');
+  const telegramService = require('../src/telegram-service');
+  const autoSyncScheduler = require('../src/auto-sync-scheduler');
+
+  await test('telegram-service kiểm tra validate token và chatId', async () => {
+    const resNoToken = await telegramService.sendTelegramMessage({ token: '', chatId: '123', text: 'Hi' });
+    assert.strictEqual(resNoToken.ok, false);
+    assert.ok(resNoToken.error.includes('Token'));
+
+    const resNoChat = await telegramService.sendTelegramMessage({ token: 'abc', chatId: '', text: 'Hi' });
+    assert.strictEqual(resNoChat.ok, false);
+    assert.ok(resNoChat.error.includes('Chat ID'));
+
+    const resNoText = await telegramService.sendTelegramMessage({ token: 'abc', chatId: '123', text: '' });
+    assert.strictEqual(resNoText.ok, false);
+    assert.ok(resNoText.error.includes('tin nhắn'));
+  });
+
+  await test('telegram-service.testTelegramConnection validate tham số', async () => {
+    const res = await telegramService.testTelegramConnection('', '');
+    assert.strictEqual(res.ok, false);
+  });
+
+  await test('auto-sync-scheduler.getStatus trả về cấu hình hiện tại', () => {
+    const status = autoSyncScheduler.getStatus();
+    assert.ok(status);
+    assert.strictEqual(typeof status.enabled, 'boolean');
+    assert.strictEqual(typeof status.intervalHours, 'number');
+    assert.strictEqual(typeof status.lookbackDays, 'number');
+    assert.strictEqual(typeof status.isRunning, 'boolean');
+  });
+
+  await test('GET /api/automation/status trả về trạng thái scheduler', async () => {
+    const { status, data } = await fetchJson('/api/automation/status');
+    assert.strictEqual(status, 200);
+    assert.strictEqual(data.ok, true);
+    assert.strictEqual(typeof data.enabled, 'boolean');
+  });
+
+  await test('POST /api/automation/config cập nhật cấu hình hợp lệ', async () => {
+    const res = await fetch(`${baseUrl}/api/automation/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        enabled: false,
+        intervalHours: 6,
+        lookbackDays: 7,
+        telegramNotify: true
+      })
+    });
+    assert.strictEqual(res.status, 200);
+    const json = await res.json();
+    assert.strictEqual(json.ok, true);
+    assert.strictEqual(json.status.enabled, false);
+  });
+
+  await test('POST /api/automation/test-telegram kiểm tra validate thiếu thông tin', async () => {
+    const res = await fetch(`${baseUrl}/api/automation/test-telegram`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: '', chatId: '' })
+    });
+    assert.strictEqual(res.status, 400);
+    const json = await res.json();
+    assert.strictEqual(json.ok, false);
+  });
+
   // Dọn dẹp dữ liệu test trong SQLite và đóng testServer
   try {
     db.getDb().prepare("DELETE FROM posts WHERE id LIKE 'test_%' OR page_id = 'page_123'").run();
