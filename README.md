@@ -3,9 +3,13 @@
 Ứng dụng tự động hóa chuyên nghiệp kết hợp **Meta Graph API** chính thức và **Playwright Chromium**:
 - 📈 **Tương tác chuẩn xác 100% từ Graph API & Playwright**: Lấy trực tiếp Lượt thích / Cảm xúc (Likes/Reactions), Bình luận (Comments) và Lượt chia sẻ (Shares).
 - 👤 **Bóc tách danh tính người đăng (Publisher)**: Tự động phát hiện Quản trị viên/Biên tập viên nào đã đăng bài (*"Đăng bởi / Published by..."*) trong nội bộ Fanpage.
-- 📊 **Visual Charts Dashboard (Chart.js)**: Biểu đồ trực quan sinh động gồm Xu hướng tương tác theo ngày (Line), Tỷ lệ bài viết tự đăng vs chia sẻ (Doughnut), và Xếp hạng tương tác top Quản trị viên (Bar).
-- 🤖 **Auto-Sync Scheduler & Báo cáo Telegram Bot**: Lập lịch tự động quét ngầm định kỳ (1h, 3h, 6h, 12h, 24h) và tự động bắn báo cáo KPI chi tiết tới Telegram Bot / Kênh chat của bạn.
-- 📑 **Xuất Excel (.xlsx) chuyên nghiệp**: Tạo báo cáo bảng tính chuẩn doanh nghiệp với 2 Sheet (Chi tiết bài viết & Bảng xếp hạng Admin), tự động tạo link Canonical mở trực tiếp bài viết.
+- 📊 **Visual Charts Dashboard & Lọc tương tác 1-Click (Chart.js)**:
+  - Click vào thanh bất kỳ bên **Top Quản trị viên** (ví dụ: *Danh Phạm*) để tự động lọc danh sách bài viết của quản trị viên đó.
+  - Click vào biểu đồ **Tỷ lệ bài viết** để lọc nhanh bài tự đăng / chia sẻ.
+  - Click vào điểm trên biểu đồ **Xu hướng tương tác theo ngày** để lọc bài viết trong ngày đó.
+- 🎯 **Thanh Active Filter Chips & Lọc theo khoảng ngày**: Hiển thị các tiêu chí lọc đang kích hoạt trực quan, hỗ trợ chọn khoảng ngày linh hoạt ngay trên Toolbar bài viết.
+- 📑 **Xuất Excel (.xlsx) thông minh theo bộ lọc**: Tải ngay file Excel phản ánh đúng danh sách bài viết theo khoảng ngày và quản trị viên đã chọn, hiển thị số bài trực tiếp trên nút bấm.
+- 🤖 **Auto-Sync Scheduler & Báo cáo Telegram Bot**: Lập lịch tự động quét ngầm định kỳ (1h, 3h, 6h, 12h, 24h) và tự động bắn báo cáo KPI chi tiết tới Telegram Bot.
 
 
 ---

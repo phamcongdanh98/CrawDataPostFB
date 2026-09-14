@@ -2471,5 +2471,315 @@ body {
   background: rgba(30, 41, 59, 0.5);
 }
 
+/* ========================================================
+   ACTIVE FILTER CHIPS BAR & INTERACTIVE CHART STYLES
+   ======================================================== */
+.active-filter-chips-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  padding: 0.55rem 0.85rem;
+  margin-top: 0.5rem;
+  margin-bottom: 0.65rem;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: var(--radius-sm);
+  backdrop-filter: blur(8px);
+  animation: fadeIn 0.2s ease;
+}
+
+.active-filters-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #38bdf8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.active-filter-chips-list {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.22rem 0.6rem;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 9999px;
+  font-size: 0.76rem;
+  color: #bae6fd;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.filter-chip:hover {
+  background: rgba(56, 189, 248, 0.22);
+  border-color: rgba(56, 189, 248, 0.6);
+  color: #fff;
+}
+
+.filter-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  color: #f1f5f9;
+  font-size: 0.65rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1;
+}
+
+.filter-chip-remove:hover {
+  background: #ef4444;
+  color: #fff;
+  transform: scale(1.15);
+}
+
+.btn-clear-all-chips {
+  background: transparent;
+  border: none;
+  color: #f87171;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  margin-left: auto;
+  text-decoration: underline;
+}
+
+.btn-clear-all-chips:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+
+/* Phần tử bảng có thể click để lọc nhanh */
+.clickable-publisher {
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.clickable-publisher:hover {
+  background: rgba(99, 102, 241, 0.2);
+  color: #a5b4fc !important;
+  text-decoration: underline;
+}
+
+.clickable-type {
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.clickable-type:hover {
+  filter: brightness(1.25);
+  transform: scale(1.05);
+}
+
+/* Con trỏ chuột tương tác trên các Canvas biểu đồ */
+#publisherChart, #typeChart, #trendChart {
+  cursor: pointer;
+}
+
+/* ==========================================================================
+   TOKEN GUIDE MODAL (CẨM NANG HƯỚNG DẪN LẤY TOKEN TỪ A ĐẾN Z)
+   ========================================================================== */
+.token-guide-modal-container {
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.98) 0%, rgba(10, 15, 29, 0.99) 100%);
+  border: 1px solid rgba(234, 179, 8, 0.3);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 30px rgba(234, 179, 8, 0.08);
+}
+
+.guide-stepper-nav {
+  display: flex;
+  background: rgba(15, 23, 42, 0.7);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.guide-step-btn {
+  flex: 1;
+  min-width: 140px;
+  padding: 0.75rem 0.6rem;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.guide-step-btn:hover {
+  background: rgba(255, 255, 255, 0.03);
+  color: #fff;
+}
+
+.guide-step-btn.active {
+  color: #facc15;
+  background: rgba(234, 179, 8, 0.08);
+  border-bottom-color: #facc15;
+  font-weight: 700;
+}
+
+.guide-step-btn .step-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  transition: all 0.2s ease;
+}
+
+.guide-step-btn.active .step-num {
+  background: #facc15;
+  color: #0f172a;
+}
+
+.guide-step-btn.completed .step-num {
+  background: #22c55e;
+  color: #fff;
+}
+
+.guide-step-view {
+  animation: fadeInStep 0.25s ease forwards;
+}
+
+@keyframes fadeInStep {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.step-header-box {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.4rem;
+}
+
+.step-badge-pill {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 0.2rem 0.55rem;
+  border-radius: 9999px;
+  background: rgba(234, 179, 8, 0.15);
+  color: #facc15;
+  border: 1px solid rgba(234, 179, 8, 0.3);
+}
+
+.step-heading {
+  font-size: 1.12rem;
+  color: #fff;
+  font-weight: 700;
+  margin: 0;
+}
+
+.step-lead {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  margin: 0 0 1rem 0;
+}
+
+.instruction-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.instruction-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+  background: rgba(30, 41, 59, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 0.9rem 1.1rem;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.instruction-card:hover {
+  background: rgba(30, 41, 59, 0.65);
+  border-color: rgba(56, 189, 248, 0.25);
+}
+
+.inst-num {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.82rem;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.inst-content {
+  flex: 1;
+}
+
+.inst-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin-bottom: 0.25rem;
+}
+
+.inst-desc {
+  font-size: 0.83rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.perm-guide-item {
+  transition: transform 0.15s ease;
+}
+
+.perm-guide-item:hover {
+  transform: translateX(3px);
+}
+
+
+
 
 

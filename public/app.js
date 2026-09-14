@@ -132,6 +132,11 @@ const viewBatches = document.getElementById('viewBatches');
 
 // View 1: Posts Table & Filters
 const postsTableBody = document.getElementById('postsTableBody');
+const filterDateRangeSelect = document.getElementById('filterDateRangeSelect');
+const filterCustomDateWrap = document.getElementById('filterCustomDateWrap');
+const filterSinceDate = document.getElementById('filterSinceDate');
+const filterUntilDate = document.getElementById('filterUntilDate');
+const btnApplyCustomDate = document.getElementById('btnApplyCustomDate');
 const filterBatchSelect = document.getElementById('filterBatchSelect');
 const filterPostType = document.getElementById('filterPostType');
 const filterPublisherSelect = document.getElementById('filterPublisherSelect');
@@ -140,6 +145,11 @@ const btnClearSearch = document.getElementById('btnClearSearch');
 const filterStatus = document.getElementById('filterStatus');
 const filterMinLikes = document.getElementById('filterMinLikes');
 const filterSortBy = document.getElementById('filterSortBy');
+const btnExportExcelFiltered = document.getElementById('btnExportExcelFiltered');
+const btnExportExcelFilteredText = document.getElementById('btnExportExcelFilteredText');
+const activeFilterChipsBar = document.getElementById('activeFilterChipsBar');
+const activeFilterChipsList = document.getElementById('activeFilterChipsList');
+const btnClearAllActiveFilters = document.getElementById('btnClearAllActiveFilters');
 const selectAllPosts = document.getElementById('selectAllPosts');
 const batchActionBar = document.getElementById('batchActionBar');
 const selectedPostsCount = document.getElementById('selectedPostsCount');
@@ -385,6 +395,12 @@ function highlightPreset(presetKey) {
   document.querySelectorAll('.btn-preset').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.preset === presetKey);
   });
+  if (filterDateRangeSelect && presetKey) {
+    filterDateRangeSelect.value = presetKey;
+  }
+  if (filterCustomDateWrap) {
+    filterCustomDateWrap.style.display = presetKey === 'custom' ? 'flex' : 'none';
+  }
 }
 
 document.querySelectorAll('.btn-preset').forEach(btn => {
@@ -392,6 +408,42 @@ document.querySelectorAll('.btn-preset').forEach(btn => {
     setDatePreset(btn.dataset.preset);
   });
 });
+
+if (filterDateRangeSelect) {
+  filterDateRangeSelect.addEventListener('change', (e) => {
+    const val = e.target.value;
+    if (val === 'custom') {
+      if (filterCustomDateWrap) filterCustomDateWrap.style.display = 'flex';
+      if (filterSinceDate) filterSinceDate.focus();
+    } else {
+      if (filterCustomDateWrap) filterCustomDateWrap.style.display = 'none';
+      setDatePreset(val);
+    }
+  });
+}
+
+if (btnApplyCustomDate) {
+  btnApplyCustomDate.addEventListener('click', () => {
+    const s = filterSinceDate ? filterSinceDate.value.trim() : '';
+    const u = filterUntilDate ? filterUntilDate.value.trim() : '';
+    if (!s && !u) {
+      showToast({ type: 'warning', message: 'Vui lòng nhập ngày bắt đầu hoặc kết thúc.' });
+      return;
+    }
+    if (sinceDateInput && s) sinceDateInput.value = s;
+    if (untilDateInput && u) untilDateInput.value = u;
+    if (sinceDatePicker && s) sinceDatePicker.value = dmyToYmd(s);
+    if (untilDatePicker && u) untilDatePicker.value = dmyToYmd(u);
+    state.since = s ? dmyToYmd(s) : '';
+    state.until = u ? dmyToYmd(u) : '';
+    state.page = 1;
+    document.querySelectorAll('.btn-preset').forEach(b => b.classList.remove('active'));
+    updateExportLinks();
+    fetchPosts();
+    fetchCharts();
+    showToast({ type: 'info', title: 'Đã lọc theo ngày tùy chọn', message: `${s || '...'} ➔ ${u || '...'}` });
+  });
+}
 
 function initDefaultDates() {
   setupDatePickerSync(sinceDateInput, sinceDatePicker, btnSinceCalendar);
@@ -488,8 +540,8 @@ async function checkConfigStatus() {
 }
 
 function updateExportLinks() {
-  const sinceVal = dmyToYmd(sinceDateInput.value.trim());
-  const untilVal = dmyToYmd(untilDateInput.value.trim());
+  const sinceVal = sinceDateInput ? dmyToYmd(sinceDateInput.value.trim()) : '';
+  const untilVal = untilDateInput ? dmyToYmd(untilDateInput.value.trim()) : '';
 
   const params = new URLSearchParams();
   if (sinceVal) params.set('since', sinceVal);
@@ -504,9 +556,317 @@ function updateExportLinks() {
   if (state.sortOrder) params.set('sortOrder', state.sortOrder);
 
   const query = params.toString() ? `?${params.toString()}` : '';
-  btnExportExcel.href = `/api/export.xlsx${query}`;
-  btnExportCsv.href = `/api/export.csv${query}`;
+  if (btnExportExcel) btnExportExcel.href = `/api/export.xlsx${query}`;
+  if (btnExportCsv) btnExportCsv.href = `/api/export.csv${query}`;
+
+  const btnExportExcelFiltered = document.getElementById('btnExportExcelFiltered');
+  if (btnExportExcelFiltered) btnExportExcelFiltered.href = `/api/export.xlsx${query}`;
+
+  // Cập nhật giá trị đồng bộ cho ô ngày ở Toolbar nếu có
+  const filterSinceDate = document.getElementById('filterSinceDate');
+  const filterUntilDate = document.getElementById('filterUntilDate');
+  if (filterSinceDate && sinceDateInput) filterSinceDate.value = sinceDateInput.value;
+  if (filterUntilDate && untilDateInput) filterUntilDate.value = untilDateInput.value;
+
+  renderActiveFilterChips();
 }
+
+/**
+ * Lọc nhanh theo Tác giả / Quản trị viên (hỗ trợ click từ biểu đồ hoặc bảng)
+ */
+function filterByPublisher(pubName) {
+  if (!pubName) return;
+  const isSame = state.publisher === pubName;
+  state.publisher = isSame ? '' : pubName;
+
+  if (filterPublisherSelect) {
+    filterPublisherSelect.value = state.publisher;
+  }
+
+  if (activeFilterNotice && currentFilterPublisherName && btnClearPublisherFilter) {
+    if (state.publisher) {
+      activeFilterNotice.style.display = 'flex';
+      currentFilterPublisherName.textContent = state.publisher;
+      btnClearPublisherFilter.style.display = 'inline-block';
+    } else {
+      activeFilterNotice.style.display = 'none';
+      btnClearPublisherFilter.style.display = 'none';
+    }
+  }
+
+  state.page = 1;
+  updateExportLinks();
+  fetchPosts();
+  fetchCharts();
+
+  // Cuộn mượt màn hình xuống danh sách bài viết
+  const viewPosts = document.getElementById('viewPosts');
+  if (viewPosts) {
+    viewPosts.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  showToast({
+    type: 'info',
+    title: state.publisher ? 'Đã lọc theo tác giả' : 'Đã bỏ lọc tác giả',
+    message: state.publisher ? `Hiển thị các bài viết do "${state.publisher}" đăng.` : 'Hiển thị bài viết của tất cả người đăng.'
+  });
+}
+
+/**
+ * Lọc nhanh theo Loại bài viết (Bài tự đăng / Bài chia sẻ)
+ */
+function filterByPostType(type) {
+  if (!type) return;
+  const isSame = state.postType === type;
+  state.postType = isSame ? 'ALL' : type;
+
+  if (filterPostType) {
+    filterPostType.value = state.postType;
+  }
+
+  state.page = 1;
+  updateExportLinks();
+  fetchPosts();
+  fetchCharts();
+
+  const viewPosts = document.getElementById('viewPosts');
+  if (viewPosts) {
+    viewPosts.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  const label = state.postType === 'ORIGINAL' ? 'Bài tự đăng' : (state.postType === 'SHARED' ? 'Bài chia sẻ' : 'Tất cả loại bài');
+  showToast({
+    type: 'info',
+    title: 'Lọc loại bài viết',
+    message: `Đang lọc: ${label}`
+  });
+}
+
+/**
+ * Lọc theo khoảng ngày (khi click vào điểm biểu đồ xu hướng ngày)
+ */
+function filterByDate(sinceYmd, untilYmd, label = '') {
+  if (!sinceYmd || !untilYmd) return;
+  if (sinceDateInput) sinceDateInput.value = ymdToDmy(sinceYmd);
+  if (untilDateInput) untilDateInput.value = ymdToDmy(untilYmd);
+  if (sinceDatePicker) sinceDatePicker.value = sinceYmd;
+  if (untilDatePicker) untilDatePicker.value = untilYmd;
+
+  state.since = sinceYmd;
+  state.until = untilYmd;
+  state.page = 1;
+
+  document.querySelectorAll('.btn-preset').forEach(b => b.classList.remove('active'));
+
+  updateExportLinks();
+  fetchPosts();
+  fetchCharts();
+
+  const viewPosts = document.getElementById('viewPosts');
+  if (viewPosts) {
+    viewPosts.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  showToast({
+    type: 'info',
+    title: 'Lọc theo ngày',
+    message: label || `Từ ${ymdToDmy(sinceYmd)} đến ${ymdToDmy(untilYmd)}`
+  });
+}
+
+/**
+ * Hiển thị thanh Chip các bộ lọc đang kích hoạt
+ */
+function renderActiveFilterChips() {
+  const container = document.getElementById('activeFilterChipsBar');
+  const list = document.getElementById('activeFilterChipsList');
+  if (!container || !list) return;
+
+  const chips = [];
+
+  // 1. Khoảng ngày
+  const sinceVal = state.since || (sinceDateInput ? dmyToYmd(sinceDateInput.value.trim()) : '');
+  const untilVal = state.until || (untilDateInput ? dmyToYmd(untilDateInput.value.trim()) : '');
+  if (sinceVal && untilVal) {
+    chips.push({
+      key: 'date',
+      icon: '📅',
+      label: `${ymdToDmy(sinceVal)} ➔ ${ymdToDmy(untilVal)}`,
+      clear: () => setDatePreset('all')
+    });
+  } else if (sinceVal) {
+    chips.push({
+      key: 'date',
+      icon: '📅',
+      label: `Từ ${ymdToDmy(sinceVal)}`,
+      clear: () => setDatePreset('all')
+    });
+  } else if (untilVal) {
+    chips.push({
+      key: 'date',
+      icon: '📅',
+      label: `Đến ${ymdToDmy(untilVal)}`,
+      clear: () => setDatePreset('all')
+    });
+  }
+
+  // 2. Người đăng
+  if (state.publisher) {
+    chips.push({
+      key: 'publisher',
+      icon: '👤',
+      label: `Quản trị viên: ${state.publisher}`,
+      clear: () => {
+        state.publisher = '';
+        if (filterPublisherSelect) filterPublisherSelect.value = '';
+        if (activeFilterNotice) activeFilterNotice.style.display = 'none';
+        if (btnClearPublisherFilter) btnClearPublisherFilter.style.display = 'none';
+        state.page = 1;
+        updateExportLinks();
+        fetchPosts();
+        fetchCharts();
+      }
+    });
+  }
+
+  // 3. Loại bài viết
+  if (state.postType && state.postType !== 'ALL') {
+    chips.push({
+      key: 'postType',
+      icon: '📑',
+      label: state.postType === 'ORIGINAL' ? 'Bài tự đăng' : 'Bài chia sẻ',
+      clear: () => {
+        state.postType = 'ALL';
+        if (filterPostType) filterPostType.value = 'ALL';
+        state.page = 1;
+        updateExportLinks();
+        fetchPosts();
+        fetchCharts();
+      }
+    });
+  }
+
+  // 4. Đợt đồng bộ
+  if (state.batchId && state.batchId !== 'ALL') {
+    chips.push({
+      key: 'batchId',
+      icon: '🕒',
+      label: `Đợt: ${state.batchId}`,
+      clear: () => {
+        state.batchId = 'ALL';
+        if (filterBatchSelect) filterBatchSelect.value = 'ALL';
+        state.page = 1;
+        updateExportLinks();
+        fetchPosts();
+        fetchCharts();
+      }
+    });
+  }
+
+  // 5. Trạng thái
+  if (state.status && state.status !== 'ALL') {
+    const statusLabels = { FOUND: 'Đã xác định', PENDING: 'Chờ quét', NOT_FOUND: 'Chưa rõ', ERROR: 'Lỗi' };
+    chips.push({
+      key: 'status',
+      icon: '⚙️',
+      label: statusLabels[state.status] || state.status,
+      clear: () => {
+        state.status = 'ALL';
+        if (filterStatus) filterStatus.value = 'ALL';
+        state.page = 1;
+        updateExportLinks();
+        fetchPosts();
+      }
+    });
+  }
+
+  // 6. Like tối thiểu
+  if (state.minLikes && Number(state.minLikes) > 0) {
+    chips.push({
+      key: 'minLikes',
+      icon: '❤️',
+      label: `>= ${state.minLikes} likes`,
+      clear: () => {
+        state.minLikes = '';
+        if (filterMinLikes) filterMinLikes.value = '';
+        state.page = 1;
+        updateExportLinks();
+        fetchPosts();
+      }
+    });
+  }
+
+  // 7. Từ khóa tìm kiếm
+  if (state.search && state.search.trim()) {
+    chips.push({
+      key: 'search',
+      icon: '🔍',
+      label: `"${state.search.trim()}"`,
+      clear: () => {
+        state.search = '';
+        if (filterSearch) filterSearch.value = '';
+        if (btnClearSearch) btnClearSearch.style.display = 'none';
+        state.page = 1;
+        updateExportLinks();
+        fetchPosts();
+      }
+    });
+  }
+
+  if (chips.length === 0) {
+    container.style.display = 'none';
+    list.innerHTML = '';
+    return;
+  }
+
+  container.style.display = 'flex';
+  list.innerHTML = '';
+
+  chips.forEach(c => {
+    const span = document.createElement('span');
+    span.className = 'filter-chip';
+    span.innerHTML = `
+      <span>${c.icon}</span>
+      <span>${escapeHtml(c.label)}</span>
+      <span class="filter-chip-remove" title="Xóa bộ lọc này">✕</span>
+    `;
+    span.querySelector('.filter-chip-remove').addEventListener('click', (e) => {
+      e.stopPropagation();
+      c.clear();
+    });
+    list.appendChild(span);
+  });
+}
+
+if (btnClearAllActiveFilters) {
+  btnClearAllActiveFilters.addEventListener('click', () => {
+    state.publisher = '';
+    if (filterPublisherSelect) filterPublisherSelect.value = '';
+    state.postType = 'ALL';
+    if (filterPostType) filterPostType.value = 'ALL';
+    state.batchId = 'ALL';
+    if (filterBatchSelect) filterBatchSelect.value = 'ALL';
+    state.status = 'ALL';
+    if (filterStatus) filterStatus.value = 'ALL';
+    state.minLikes = '';
+    if (filterMinLikes) filterMinLikes.value = '';
+    state.search = '';
+    if (filterSearch) filterSearch.value = '';
+    if (btnClearSearch) btnClearSearch.style.display = 'none';
+    if (activeFilterNotice) activeFilterNotice.style.display = 'none';
+    if (btnClearPublisherFilter) btnClearPublisherFilter.style.display = 'none';
+    if (filterCustomDateWrap) filterCustomDateWrap.style.display = 'none';
+
+    setDatePreset('all');
+    state.page = 1;
+    updateExportLinks();
+    fetchPosts();
+    fetchCharts();
+    fetchPublishers();
+    showToast({ type: 'success', title: 'Đã xóa tất cả bộ lọc', message: 'Hiển thị toàn bộ dữ liệu bài viết.' });
+  });
+}
+
 
 // ==========================================================================
 // STATS & METRICS DISPLAY (Hỗ trợ lọc động theo bộ lọc bảng)
@@ -730,6 +1090,11 @@ async function fetchPosts() {
     state.currentPostsCache = data.items || [];
     renderPostsTable(data.items || []);
     renderPagination(data.total || 0);
+
+    const totalCount = data.total || 0;
+    if (btnExportExcelFilteredText) {
+      btnExportExcelFilteredText.textContent = `Xuất Excel (${totalCount.toLocaleString()} bài)`;
+    }
   } catch (err) {
     postsTableBody.innerHTML = `
       <tr>
@@ -795,24 +1160,25 @@ function renderPostsTable(items) {
       statusBadge = `<span class="badge badge-danger" title="Lỗi khi truy cập bài viết">❌ ${escapeHtml(p.publisher_status)}</span>`;
     }
 
-    // Badge loại bài viết
+    // Badge loại bài viết (hỗ trợ click để lọc)
     const isShared = p.post_type === 'SHARED';
     const postTypeBadge = isShared
-      ? `<span class="badge badge-shared" title="Bài chia sẻ lại từ nguồn khác">🔄 Chia sẻ</span>`
-      : `<span class="badge badge-original" title="Bài viết do Trang tự đăng tải">📝 Tự đăng</span>`;
+      ? `<span class="badge badge-shared clickable-type" data-type="SHARED" title="Bấm để lọc bài chia sẻ" style="cursor: pointer;">🔄 Chia sẻ</span>`
+      : `<span class="badge badge-original clickable-type" data-type="ORIGINAL" title="Bấm để lọc bài tự đăng" style="cursor: pointer;">📝 Tự đăng</span>`;
 
-    // Cột Người đăng (Quản trị viên)
+    // Cột Người đăng (Quản trị viên) - hỗ trợ click để lọc
     let publisherHtml = '<span class="text-dim">Chưa xác định</span>';
     if (p.publisher_status === 'FOUND' && p.publisher_name) {
       const initial = p.publisher_name.charAt(0).toUpperCase();
       const profileLink = p.publisher_profile_url
-        ? `<a href="${escapeHtml(p.publisher_profile_url)}" target="_blank" class="publisher-link" title="Xem trang cá nhân">${escapeHtml(p.publisher_name)}</a>`
+        ? `<a href="${escapeHtml(p.publisher_profile_url)}" target="_blank" class="publisher-link" title="Xem trang cá nhân" onclick="event.stopPropagation()">${escapeHtml(p.publisher_name)}</a>`
         : `<strong class="text-success">${escapeHtml(p.publisher_name)}</strong>`;
 
       publisherHtml = `
-        <div class="publisher-cell">
+        <div class="publisher-cell clickable-publisher" data-publisher="${escapeHtml(p.publisher_name)}" title="Bấm để lọc theo quản trị viên: ${escapeHtml(p.publisher_name)}" style="cursor: pointer;">
           <span class="publisher-avatar">${initial}</span>
           ${profileLink}
+          <span style="font-size: 0.72rem; color: #38bdf8; margin-left: 2px;" title="Lọc theo tác giả này">🔍</span>
         </div>
       `;
     }
@@ -921,6 +1287,28 @@ function renderPostsTable(items) {
   });
 
   updateBatchActionBar();
+}
+
+if (postsTableBody) {
+  postsTableBody.addEventListener('click', (e) => {
+    const pubEl = e.target.closest('.clickable-publisher');
+    if (pubEl && !e.target.closest('a')) {
+      const pubName = pubEl.dataset.publisher;
+      if (pubName) {
+        filterByPublisher(pubName);
+        return;
+      }
+    }
+
+    const typeEl = e.target.closest('.clickable-type');
+    if (typeEl) {
+      const type = typeEl.dataset.type;
+      if (type) {
+        filterByPostType(type);
+        return;
+      }
+    }
+  });
 }
 
 function renderPagination(total) {
@@ -2311,6 +2699,19 @@ function renderTrendChart(trends = []) {
         mode: 'index',
         intersect: false
       },
+      onClick: (event, elements) => {
+        if (elements && elements.length > 0) {
+          const index = elements[0].index;
+          const item = trends[index];
+          if (item && item.date) {
+            filterByDate(item.date, item.date, `Ngày ${formatVnDateDisplay(item.date)}`);
+          }
+        }
+      },
+      onHover: (event, elements) => {
+        const canvas = event.chart ? event.chart.canvas : (event.native ? event.native.target : null);
+        if (canvas) canvas.style.cursor = elements && elements.length > 0 ? 'pointer' : 'default';
+      },
       plugins: {
         legend: {
           position: 'top',
@@ -2327,7 +2728,12 @@ function renderTrendChart(trends = []) {
           borderColor: 'rgba(56, 189, 248, 0.3)',
           borderWidth: 1,
           padding: 8,
-          cornerRadius: 6
+          cornerRadius: 6,
+          callbacks: {
+            footer: function () {
+              return '👉 Bấm vào điểm ngày để lọc danh sách bài viết';
+            }
+          }
         }
       },
       scales: {
@@ -2379,7 +2785,7 @@ function renderTypeChart(postTypes = []) {
           backgroundColor: total > 0 ? ['#3b82f6', '#a855f7'] : ['rgba(148, 163, 184, 0.2)'],
           borderColor: 'rgba(15, 23, 42, 0.8)',
           borderWidth: 3,
-          hoverOffset: 4
+          hoverOffset: 6
         }
       ]
     },
@@ -2387,6 +2793,17 @@ function renderTypeChart(postTypes = []) {
       responsive: true,
       maintainAspectRatio: false,
       cutout: '68%',
+      onClick: (event, elements) => {
+        if (elements && elements.length > 0) {
+          const index = elements[0].index;
+          const clickedType = index === 0 ? 'ORIGINAL' : 'SHARED';
+          filterByPostType(clickedType);
+        }
+      },
+      onHover: (event, elements) => {
+        const canvas = event.chart ? event.chart.canvas : (event.native ? event.native.target : null);
+        if (canvas) canvas.style.cursor = elements && elements.length > 0 ? 'pointer' : 'default';
+      },
       plugins: {
         legend: {
           position: 'bottom',
@@ -2404,6 +2821,9 @@ function renderTypeChart(postTypes = []) {
               const val = context.raw || 0;
               const pct = Math.round((val / total) * 100);
               return ` ${context.label}: ${val} bài (${pct}%)`;
+            },
+            footer: function () {
+              return '👉 Bấm để lọc bài viết theo loại này';
             }
           }
         }
@@ -2428,6 +2848,17 @@ function renderPublisherChart(publishers = []) {
   const labels = validPubs.map(p => p.publisher_name || 'Khác');
   const engagements = validPubs.map(p => p.total_engagements || 0);
 
+  // Tô màu nổi bật nếu thanh này đang được chọn lọc
+  const backgroundColors = validPubs.map(p => 
+    state.publisher && state.publisher === p.publisher_name ? '#fbbf24' : 'rgba(99, 102, 241, 0.75)'
+  );
+  const borderColors = validPubs.map(p => 
+    state.publisher && state.publisher === p.publisher_name ? '#f59e0b' : '#818cf8'
+  );
+  const hoverColors = validPubs.map(p => 
+    state.publisher && state.publisher === p.publisher_name ? '#f59e0b' : '#6366f1'
+  );
+
   const ctx = canvas.getContext('2d');
   publisherChartInstance = new Chart(ctx, {
     type: 'bar',
@@ -2437,11 +2868,11 @@ function renderPublisherChart(publishers = []) {
         {
           label: 'Tổng tương tác',
           data: engagements,
-          backgroundColor: 'rgba(99, 102, 241, 0.75)',
-          borderColor: '#818cf8',
+          backgroundColor: backgroundColors,
+          borderColor: borderColors,
           borderWidth: 1,
           borderRadius: 6,
-          hoverBackgroundColor: '#6366f1'
+          hoverBackgroundColor: hoverColors
         }
       ]
     },
@@ -2449,6 +2880,19 @@ function renderPublisherChart(publishers = []) {
       indexAxis: 'y',
       responsive: true,
       maintainAspectRatio: false,
+      onClick: (event, elements) => {
+        if (elements && elements.length > 0) {
+          const index = elements[0].index;
+          const pub = validPubs[index];
+          if (pub && pub.publisher_name) {
+            filterByPublisher(pub.publisher_name);
+          }
+        }
+      },
+      onHover: (event, elements) => {
+        const canvas = event.chart ? event.chart.canvas : (event.native ? event.native.target : null);
+        if (canvas) canvas.style.cursor = elements && elements.length > 0 ? 'pointer' : 'default';
+      },
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -2461,6 +2905,9 @@ function renderPublisherChart(publishers = []) {
             afterLabel: function (context) {
               const pub = validPubs[context.dataIndex];
               return pub ? `Số lượng: ${pub.post_count} bài đăng` : '';
+            },
+            footer: function () {
+              return '👉 Bấm vào thanh để lọc danh sách bài viết';
             }
           }
         }
@@ -3723,6 +4170,144 @@ if (btnSubmitAdminCreateUser) {
     }
   });
 }
+
+// ==========================================================================
+// MODAL HƯỚNG DẪN LẤY TOKEN FACEBOOK TỪ ĐẦU ĐẾN CUỐI (TOKEN GUIDE)
+// ==========================================================================
+
+const btnOpenTokenGuideModal = document.getElementById('btnOpenTokenGuideModal');
+const tokenGuideModal = document.getElementById('tokenGuideModal');
+const btnCloseTokenGuideModal = document.getElementById('btnCloseTokenGuideModal');
+const btnDismissTokenGuide = document.getElementById('btnDismissTokenGuide');
+const btnGuidePrev = document.getElementById('btnGuidePrev');
+const btnGuideNext = document.getElementById('btnGuideNext');
+const btnGuideGoSettings = document.getElementById('btnGuideGoSettings');
+const btnQuickOpenSettings = document.getElementById('btnQuickOpenSettings');
+
+let currentGuideStep = 1;
+const totalGuideSteps = 5;
+
+function switchGuideStep(step) {
+  if (step < 1) step = 1;
+  if (step > totalGuideSteps) step = totalGuideSteps;
+  currentGuideStep = step;
+
+  // Cập nhật Buttons trên Stepper
+  document.querySelectorAll('.guide-step-btn').forEach(btn => {
+    const s = parseInt(btn.dataset.step, 10);
+    btn.classList.toggle('active', s === currentGuideStep);
+    btn.classList.toggle('completed', s < currentGuideStep);
+  });
+
+  // Hiển thị View tương ứng
+  for (let i = 1; i <= totalGuideSteps; i++) {
+    const view = document.getElementById(`guideStepView${i}`);
+    if (view) {
+      view.style.display = i === currentGuideStep ? 'block' : 'none';
+    }
+  }
+
+  // Cập nhật trạng thái nút Prev & Next
+  if (btnGuidePrev) {
+    btnGuidePrev.style.display = currentGuideStep > 1 ? 'inline-flex' : 'none';
+  }
+  if (btnGuideNext) {
+    if (currentGuideStep === totalGuideSteps) {
+      btnGuideNext.innerHTML = '⚙️ Hoàn tất & Mở Cài Đặt';
+      btnGuideNext.className = 'btn btn-warning btn-sm';
+      btnGuideNext.style.fontWeight = '700';
+    } else {
+      btnGuideNext.innerHTML = 'Bước tiếp theo ➜';
+      btnGuideNext.className = 'btn btn-primary btn-sm';
+      btnGuideNext.style.fontWeight = '600';
+    }
+  }
+
+  // Tự động cuộn phần body lên đầu
+  const body = tokenGuideModal ? tokenGuideModal.querySelector('.guide-modal-body') : null;
+  if (body) body.scrollTop = 0;
+}
+
+function openTokenGuideModal() {
+  if (!tokenGuideModal) return;
+  tokenGuideModal.style.display = 'flex';
+  switchGuideStep(1);
+}
+
+function closeTokenGuideModal() {
+  if (!tokenGuideModal) return;
+  tokenGuideModal.style.display = 'none';
+}
+
+if (btnOpenTokenGuideModal) {
+  btnOpenTokenGuideModal.addEventListener('click', openTokenGuideModal);
+}
+if (btnCloseTokenGuideModal) {
+  btnCloseTokenGuideModal.addEventListener('click', closeTokenGuideModal);
+}
+if (btnDismissTokenGuide) {
+  btnDismissTokenGuide.addEventListener('click', closeTokenGuideModal);
+}
+if (tokenGuideModal) {
+  tokenGuideModal.addEventListener('click', (e) => {
+    if (e.target === tokenGuideModal) closeTokenGuideModal();
+  });
+}
+
+// Click nút bước trên Stepper
+document.querySelectorAll('.guide-step-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const s = parseInt(btn.dataset.step, 10);
+    if (!isNaN(s)) switchGuideStep(s);
+  });
+});
+
+if (btnGuidePrev) {
+  btnGuidePrev.addEventListener('click', () => {
+    switchGuideStep(currentGuideStep - 1);
+  });
+}
+
+if (btnGuideNext) {
+  btnGuideNext.addEventListener('click', () => {
+    if (currentGuideStep < totalGuideSteps) {
+      switchGuideStep(currentGuideStep + 1);
+    } else {
+      closeTokenGuideModal();
+      openSettingsModal();
+    }
+  });
+}
+
+function goToSettingsFromGuide() {
+  closeTokenGuideModal();
+  openSettingsModal();
+}
+if (btnGuideGoSettings) btnGuideGoSettings.addEventListener('click', goToSettingsFromGuide);
+if (btnQuickOpenSettings) btnQuickOpenSettings.addEventListener('click', goToSettingsFromGuide);
+
+// Sao chép nhanh tên quyền
+document.querySelectorAll('.btn-copy-perm').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const perm = btn.dataset.perm;
+    if (!perm) return;
+    try {
+      await navigator.clipboard.writeText(perm);
+      const originalText = btn.textContent;
+      btn.textContent = 'Đã chép ✓';
+      btn.style.borderColor = '#22c55e';
+      btn.style.color = '#22c55e';
+      showToast({ type: 'success', title: 'Đã sao chép quyền', message: `Đã lưu "${perm}" vào clipboard.` });
+      setTimeout(() => {
+        btn.textContent = originalText;
+        btn.style.borderColor = '';
+        btn.style.color = '';
+      }, 2000);
+    } catch (e) {
+      prompt('Sao chép quyền:', perm);
+    }
+  });
+});
 
 // ==========================================================================
 // KHỞI CHẠY ỨNG DỤNG (INITIALIZATION)

@@ -39,6 +39,10 @@
 
         <div class="header-actions">
           <div class="btn-group-system">
+            <button id="btnOpenTokenGuideModal" class="btn btn-glass" style="border-color: rgba(234, 179, 8, 0.45); color: #facc15; background: rgba(234, 179, 8, 0.08);" title="Xem cẩm nang hướng dẫn từng bước lấy Token Facebook đầy đủ quyền và vĩnh viễn">
+              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
+              <span>📖 Hướng dẫn lấy Token</span>
+            </button>
             <button id="btnOpenAutomationModal" class="btn btn-glass" style="border-color: rgba(56, 189, 248, 0.4); color: #38bdf8;" title="Cài đặt lịch tự động quét bài & gửi báo cáo Telegram Bot">
               <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
               <span id="headerAutoBadge">🤖 Tự động hóa & Bot</span>
@@ -413,6 +417,27 @@
         </div>
 
         <div class="filter-dropdowns">
+          <!-- Filter Thời gian (MỚI) -->
+          <div class="filter-item">
+            <span class="filter-label">Thời gian:</span>
+            <select id="filterDateRangeSelect" class="custom-select" title="Lọc bài viết theo khoảng ngày">
+              <option value="30days">30 ngày qua</option>
+              <option value="7days">7 ngày qua</option>
+              <option value="today">Hôm nay</option>
+              <option value="yesterday">Hôm qua</option>
+              <option value="thismonth">Tháng này</option>
+              <option value="all">Tất cả bài viết</option>
+              <option value="custom">📅 Tùy chọn ngày...</option>
+            </select>
+          </div>
+
+          <div id="filterCustomDateWrap" class="filter-custom-date" style="display: none; align-items: center; gap: 4px;">
+            <input type="text" id="filterSinceDate" placeholder="dd/mm/yyyy" maxlength="10" class="custom-input-date" style="width: 90px; padding: 0.38rem 0.45rem; font-size: 0.8rem; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-sm); color: #fff;">
+            <span style="color: var(--text-muted); font-size: 0.8rem;">-</span>
+            <input type="text" id="filterUntilDate" placeholder="dd/mm/yyyy" maxlength="10" class="custom-input-date" style="width: 90px; padding: 0.38rem 0.45rem; font-size: 0.8rem; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-sm); color: #fff;">
+            <button type="button" id="btnApplyCustomDate" class="btn btn-sm btn-primary" style="padding: 0.38rem 0.5rem; font-size: 0.78rem;">Áp dụng</button>
+          </div>
+
           <!-- Filter Đợt đồng bộ -->
           <div class="filter-item">
             <span class="filter-label">Đợt:</span>
@@ -469,11 +494,24 @@
             </select>
           </div>
 
+          <!-- Nút Xuất Excel theo bộ lọc hiện tại (MỚI) -->
+          <a id="btnExportExcelFiltered" href="/api/export.xlsx" class="btn btn-export-excel btn-sm" download title="Xuất file Excel cho đúng danh sách bài viết đang lọc theo ngày và điều kiện hiện tại" style="padding: 0.42rem 0.85rem; font-size: 0.82rem; font-weight: 600; text-decoration: none; border-radius: var(--radius-sm); display: inline-flex; align-items: center; gap: 0.35rem;">
+            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+            <span id="btnExportExcelFilteredText">Xuất Excel</span>
+          </a>
+
           <button id="btnRefreshList" class="btn btn-icon-refresh" title="Làm mới danh sách bài viết">
             <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
             <span>Làm mới</span>
           </button>
         </div>
+      </div>
+
+      <!-- Thanh Chip hiển thị các tiêu chí lọc đang kích hoạt (Active Filters Bar - MỚI) -->
+      <div id="activeFilterChipsBar" class="active-filter-chips-bar" style="display: none;">
+        <span class="active-filters-title">🎯 Đang lọc:</span>
+        <div id="activeFilterChipsList" class="active-filter-chips-list"></div>
+        <button type="button" id="btnClearAllActiveFilters" class="btn-clear-all-chips" title="Bỏ tất cả bộ lọc và hiển thị toàn bộ bài viết">Xóa tất cả bộ lọc ✕</button>
       </div>
 
       <!-- Thanh thao tác hàng loạt (Batch Action Bar) -->
@@ -1244,6 +1282,337 @@
               </tr>
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- MODAL HƯỚNG DẪN LẤY TOKEN FACEBOOK TỪ ĐẦU ĐẾN CUỐI (TOKEN GUIDE) -->
+  <!-- ================================================================= -->
+  <div id="tokenGuideModal" class="modal-overlay" style="display: none;">
+    <div class="modal-container token-guide-modal-container" style="max-width: 880px; width: 95%; max-height: 90vh; display: flex; flex-direction: column;">
+      <div class="modal-header" style="border-bottom: 1px solid var(--border); padding: 1.1rem 1.5rem;">
+        <div class="modal-title-wrap">
+          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+            <span class="badge badge-warning" style="background: rgba(234, 179, 8, 0.15); color: #facc15; border: 1px solid rgba(234, 179, 8, 0.3); font-weight: 700;">📖 CẨM NANG TOÀN DIỆN</span>
+            <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);">Meta Graph API v26.0</span>
+          </div>
+          <h3 class="modal-title" style="font-size: 1.2rem; color: #fff; font-weight: 700;">Hướng Dẫn Lấy Facebook Access Token Từ A Đến Z</h3>
+          <p class="modal-desc" style="font-size: 0.82rem; color: var(--text-secondary); margin-top: 2px;">
+            Thực hiện 5 bước đơn giản để sở hữu Token vĩnh viễn và cấp đủ quyền đọc chuẩn xác 100% Likes, Comments, Shares.
+          </p>
+        </div>
+        <button id="btnCloseTokenGuideModal" class="btn-close" title="Đóng cửa sổ hướng dẫn">✕</button>
+      </div>
+
+      <!-- Stepper / Navigation Tabs giữa các bước -->
+      <div class="guide-stepper-nav" id="guideStepperNav">
+        <button type="button" class="guide-step-btn active" data-step="1">
+          <span class="step-num">1</span>
+          <span class="step-label">Tạo App Meta</span>
+        </button>
+        <button type="button" class="guide-step-btn" data-step="2">
+          <span class="step-num">2</span>
+          <span class="step-label">Lấy Page ID</span>
+        </button>
+        <button type="button" class="guide-step-btn" data-step="3">
+          <span class="step-num">3</span>
+          <span class="step-label">Cấp 4 Quyền Cốt Lõi</span>
+        </button>
+        <button type="button" class="guide-step-btn" data-step="4">
+          <span class="step-num">4</span>
+          <span class="step-label">Bí Quyết Vĩnh Viễn</span>
+        </button>
+        <button type="button" class="guide-step-btn" data-step="5">
+          <span class="step-num">5</span>
+          <span class="step-label">Dán & Kiểm Tra Web</span>
+        </button>
+      </div>
+
+      <!-- Khung cảnh báo quyền pages_read_user_content (Cực kỳ quan trọng) -->
+      <div class="guide-highlight-banner" style="margin: 0.75rem 1.25rem 0 1.25rem; padding: 0.75rem 1rem; border-radius: 8px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.35); display: flex; align-items: flex-start; gap: 0.75rem;">
+        <span style="font-size: 1.3rem; line-height: 1;">💡</span>
+        <div style="font-size: 0.82rem; color: #fca5a5; line-height: 1.5;">
+          <strong>Lưu ý sống còn:</strong> Nếu bài viết lấy về có Lượt chia sẻ nhưng <strong style="color: #f87171;">Likes và Comments đều bằng 0</strong>, nguyên nhân 100% là do Token thiếu quyền <code style="background: rgba(0,0,0,0.4); padding: 2px 5px; border-radius: 4px; color: #fef08a; font-family: monospace;">pages_read_user_content</code> ở <strong>Bước 3</strong>.
+        </div>
+      </div>
+
+      <!-- Thân nội dung từng bước cuộn được -->
+      <div class="modal-body guide-modal-body" style="overflow-y: auto; padding: 1.25rem; flex: 1;">
+        
+        <!-- BƯỚC 1: TẠO ỨNG DỤNG META -->
+        <div id="guideStepView1" class="guide-step-view active">
+          <div class="step-header-box">
+            <span class="step-badge-pill">Giai đoạn 1 / 5</span>
+            <h4 class="step-heading">Khởi Tạo Ứng Dụng (App) Trên Meta For Developers</h4>
+          </div>
+          <p class="step-lead">
+            Bạn cần sử dụng tài khoản Facebook cá nhân đang trực tiếp nắm quyền <strong>Quản trị viên (Admin)</strong> hoặc <strong>Biên tập viên</strong> của Fanpage cần thống kê.
+          </p>
+
+          <div class="instruction-cards">
+            <div class="instruction-card">
+              <div class="inst-num">1.1</div>
+              <div class="inst-content">
+                <div class="inst-title">Truy cập Cổng Meta for Developers</div>
+                <p class="inst-desc">Mở trình duyệt và truy cập trang chủ nhà phát triển của Meta:</p>
+                <div style="margin-top: 0.4rem;">
+                  <a href="https://developers.facebook.com/" target="_blank" class="btn btn-sm btn-outline" style="color: #38bdf8; border-color: rgba(56,189,248,0.4); text-decoration: none;">
+                    <span>↗ Mở developers.facebook.com</span>
+                  </a>
+                </div>
+                <small class="text-dim" style="display: block; margin-top: 0.35rem;">Nếu là lần đầu truy cập, bấm <strong>Bắt đầu (Get Started)</strong> -> Xác minh số điện thoại -> Chọn vai trò "Nhà phát triển".</small>
+              </div>
+            </div>
+
+            <div class="instruction-card">
+              <div class="inst-num">1.2</div>
+              <div class="inst-content">
+                <div class="inst-title">Tạo ứng dụng mới (Create App)</div>
+                <p class="inst-desc">Ở góc trên bên phải, bấm vào <strong>Ứng dụng của tôi (My Apps)</strong> -> Bấm nút màu xanh nổi bật <strong>Tạo ứng dụng (Create App)</strong>.</p>
+              </div>
+            </div>
+
+            <div class="instruction-card">
+              <div class="inst-num">1.3</div>
+              <div class="inst-content">
+                <div class="inst-title">Chọn loại ứng dụng: "Doanh nghiệp (Business)"</div>
+                <p class="inst-desc">
+                  - Nếu thấy danh sách trường hợp: Chọn ô <strong>Khác (Other)</strong> -> Bấm <strong>Tiếp (Next)</strong>.<br>
+                  - Chọn loại ứng dụng: <strong>Doanh nghiệp (Business)</strong> <em>(Bắt buộc để hỗ trợ đầy đủ quyền quản lý Fanpage)</em> -> Bấm <strong>Tiếp</strong>.
+                </p>
+              </div>
+            </div>
+
+            <div class="instruction-card">
+              <div class="inst-num">1.4</div>
+              <div class="inst-content">
+                <div class="inst-title">Điền thông tin và xác nhận mật khẩu</div>
+                <p class="inst-desc">
+                  - <strong>Tên hiển thị ứng dụng:</strong> Điền tên bất kỳ (Ví dụ: <code>Thong Ke Fanpage</code>).<br>
+                  <em style="color: #f59e0b; font-size: 0.78rem;">⚠️ Tuyệt đối không chứa chữ Facebook, Meta, FB trong tên vì Meta sẽ từ chối.</em><br>
+                  - Bấm nút <strong>Tạo ứng dụng</strong> -> Nhập mật khẩu Facebook cá nhân để xác thực danh tính.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- BƯỚC 2: LẤY PAGE ID FANPAGE -->
+        <div id="guideStepView2" class="guide-step-view" style="display: none;">
+          <div class="step-header-box">
+            <span class="step-badge-pill">Giai đoạn 2 / 5</span>
+            <h4 class="step-heading">Lấy Mã Định Danh Fanpage (Page ID)</h4>
+          </div>
+          <p class="step-lead">Mã Page ID là một dãy số nguyên (15 - 16 chữ số) đại diện duy nhất cho Trang Facebook của bạn.</p>
+
+          <div class="instruction-cards">
+            <div class="instruction-card">
+              <div class="inst-num">2.1</div>
+              <div class="inst-content">
+                <div class="inst-title">Cách 1: Xem trực tiếp trong Fanpage (Dễ nhất)</div>
+                <p class="inst-desc">
+                  1. Mở trang Fanpage của bạn trên Facebook bằng máy tính.<br>
+                  2. Bấm vào tab <strong>Giới thiệu (About)</strong>.<br>
+                  3. Bấm vào mục <strong>Tính minh bạch của Trang (Page Transparency)</strong>.<br>
+                  4. Bạn sẽ thấy dòng chữ: <strong>ID Trang: 1000xxxxxxxxxxx</strong>. Hãy copy dãy số này.
+                </p>
+              </div>
+            </div>
+
+            <div class="instruction-card">
+              <div class="inst-num">2.2</div>
+              <div class="inst-content">
+                <div class="inst-title">Cách 2: Tra cứu nhanh bằng đường link Fanpage</div>
+                <p class="inst-desc">Nếu Fanpage có link rút gọn dạng chữ (Ví dụ: <code>facebook.com/nhatrangtoday</code>):</p>
+                <div style="margin-top: 0.4rem;">
+                  <a href="https://lookup-id.com/" target="_blank" class="btn btn-sm btn-outline" style="color: #38bdf8; border-color: rgba(56,189,248,0.4); text-decoration: none;">
+                    <span>↗ Mở trang Lookup-ID.com</span>
+                  </a>
+                </div>
+                <small class="text-dim" style="display: block; margin-top: 0.35rem;">Dán link Fanpage vào ô tìm kiếm -> Nhấn nút tra cứu -> Hệ thống trả về Page ID ngay lập tức.</small>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- BƯỚC 3: CẤP 4 QUYỀN CỐT LÕI TRÊN GRAPH EXPLORER -->
+        <div id="guideStepView3" class="guide-step-view" style="display: none;">
+          <div class="step-header-box">
+            <span class="step-badge-pill">Giai đoạn 3 / 5</span>
+            <h4 class="step-heading">Mở Graph API Explorer & Bắt Buộc Cấp 4 Quyền</h4>
+          </div>
+          <p class="step-lead">Đây là bước cốt lõi nhất để đảm bảo bài viết tải về không bị thiếu tương tác.</p>
+
+          <div style="margin-bottom: 1rem;">
+            <a href="https://developers.facebook.com/tools/explorer/" target="_blank" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.55rem 1rem; font-weight: 600; text-decoration: none;">
+              <span>↗ Mở Công Cụ Graph API Explorer</span>
+            </a>
+          </div>
+
+          <div class="instruction-cards">
+            <div class="instruction-card">
+              <div class="inst-num">3.1</div>
+              <div class="inst-content">
+                <div class="inst-title">Chọn đúng App vừa tạo</div>
+                <p class="inst-desc">Nhìn sang cột bên phải tại mục <strong>Meta App</strong>: Bấm menu xổ xuống và chọn đúng tên ứng dụng bạn vừa tạo ở Bước 1.</p>
+              </div>
+            </div>
+
+            <div class="instruction-card">
+              <div class="inst-num">3.2</div>
+              <div class="inst-content">
+                <div class="inst-title">Bấm "Add a Permission" và thêm đủ 4 quyền sau:</div>
+                <p class="inst-desc">Gõ từng quyền vào ô tìm kiếm hoặc bấm nút copy dưới đây để dán vào:</p>
+
+                <div class="permissions-list-guide" style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem;">
+                  <div class="perm-guide-item" style="display: flex; justify-content: space-between; align-items: center; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 6px; padding: 0.5rem 0.75rem;">
+                    <div>
+                      <code style="color: #f87171; font-weight: 700; font-size: 0.9rem;">pages_read_user_content</code>
+                      <div style="font-size: 0.75rem; color: #fca5a5;">(QUAN TRỌNG NHẤT: Bắt buộc để đọc Likes, Comments & Reactions của người dùng)</div>
+                    </div>
+                    <button type="button" class="btn btn-xs btn-outline btn-copy-perm" data-perm="pages_read_user_content" style="color: #f87171; border-color: rgba(239, 68, 68, 0.5);">Sao chép</button>
+                  </div>
+
+                  <div class="perm-guide-item" style="display: flex; justify-content: space-between; align-items: center; background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 6px; padding: 0.5rem 0.75rem;">
+                    <div>
+                      <code style="color: #38bdf8; font-weight: 700; font-size: 0.9rem;">pages_show_list</code>
+                      <div style="font-size: 0.75rem; color: #94a3b8;">(Cho phép xem danh sách các Fanpage mà bạn có quyền quản lý)</div>
+                    </div>
+                    <button type="button" class="btn btn-xs btn-outline btn-copy-perm" data-perm="pages_show_list" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.5);">Sao chép</button>
+                  </div>
+
+                  <div class="perm-guide-item" style="display: flex; justify-content: space-between; align-items: center; background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 6px; padding: 0.5rem 0.75rem;">
+                    <div>
+                      <code style="color: #38bdf8; font-weight: 700; font-size: 0.9rem;">pages_read_engagement</code>
+                      <div style="font-size: 0.75rem; color: #94a3b8;">(Đọc bài viết và các chỉ số tương tác Fanpage)</div>
+                    </div>
+                    <button type="button" class="btn btn-xs btn-outline btn-copy-perm" data-perm="pages_read_engagement" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.5);">Sao chép</button>
+                  </div>
+
+                  <div class="perm-guide-item" style="display: flex; justify-content: space-between; align-items: center; background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 6px; padding: 0.5rem 0.75rem;">
+                    <div>
+                      <code style="color: #38bdf8; font-weight: 700; font-size: 0.9rem;">read_insights</code>
+                      <div style="font-size: 0.75rem; color: #94a3b8;">(Đọc số liệu phân tích và thống kê mở rộng)</div>
+                    </div>
+                    <button type="button" class="btn btn-xs btn-outline btn-copy-perm" data-perm="read_insights" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.5);">Sao chép</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="instruction-card">
+              <div class="inst-num">3.3</div>
+              <div class="inst-content">
+                <div class="inst-title">Bấm nút "Generate Access Token"</div>
+                <p class="inst-desc">
+                  1. Bấm nút màu xanh <strong>Generate Access Token</strong>.<br>
+                  2. Cửa sổ Facebook hiện lên: Bấm <strong>Tiếp tục dưới tên bạn</strong> -> Chọn Fanpage của bạn -> Bấm <strong>Tiếp tục</strong>.<br>
+                  3. <strong>Bật tất cả công tắc màu xanh</strong> cho các quyền được yêu cầu -> Bấm <strong>Xong (Done)</strong>.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- BƯỚC 4: BÍ QUYẾT TẠO TOKEN VĨNH VIỄN -->
+        <div id="guideStepView4" class="guide-step-view" style="display: none;">
+          <div class="step-header-box">
+            <span class="step-badge-pill">Giai đoạn 4 / 5</span>
+            <h4 class="step-heading">Bí Quyết Lấy Page Access Token Vĩnh Viễn (Never Expire)</h4>
+          </div>
+          <p class="step-lead">Mặc định Token vừa tạo là <em>User Token</em> (chỉ dùng được khoảng 1-2 tiếng sẽ hết hạn). Hãy chuyển thành <strong>Page Access Token</strong> để dùng vĩnh viễn!</p>
+
+          <div class="instruction-cards">
+            <div class="instruction-card">
+              <div class="inst-num">4.1</div>
+              <div class="inst-content">
+                <div class="inst-title">Chuyển sang Tên Fanpage tại ô "User or Page"</div>
+                <p class="inst-desc">
+                  Tại giao diện Graph Explorer, nhìn lên ô <strong>User or Page</strong> (ngay phía trên ô Access Token):<br>
+                  1. Mặc định ô này đang hiển thị tên Facebook cá nhân của bạn.<br>
+                  2. 👉 <strong>Bấm vào menu xổ xuống của ô User or Page</strong>.<br>
+                  3. Chọn đúng <strong>Tên Fanpage của bạn</strong> trong danh sách bên dưới mục <em>"Page Access Tokens"</em>.
+                </p>
+              </div>
+            </div>
+
+            <div class="instruction-card">
+              <div class="inst-num">4.2</div>
+              <div class="inst-content">
+                <div class="inst-title">Sao chép mã Token vĩnh viễn</div>
+                <p class="inst-desc">
+                  - Sau khi chọn tên Fanpage, chuỗi ký tự trong ô <strong>Access Token</strong> sẽ tự động đổi mới (chuỗi bắt đầu bằng <code>EA...</code>).<br>
+                  - Đây chính là <strong>Page Access Token vĩnh viễn</strong>. Token này gắn liền với quyền quản trị Fanpage và <strong style="color: #22c55e;">KHÔNG BAO GIỜ HẾT HẠN (Expires: Never)</strong>.<br>
+                  - Bấm nút <strong>Copy</strong> bên cạnh ô Access Token để lưu mã này vào bộ nhớ tạm.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- BƯỚC 5: DÁN VÀO WEB VÀ BẮT ĐẦU -->
+        <div id="guideStepView5" class="guide-step-view" style="display: none;">
+          <div class="step-header-box">
+            <span class="step-badge-pill">Giai đoạn 5 / 5</span>
+            <h4 class="step-heading">Dán Vào Web & Kiểm Tra Trực Tiếp</h4>
+          </div>
+          <p class="step-lead">Bước cuối cùng: Đưa Page ID và Token vào ứng dụng để tự động lưu vĩnh viễn vào hệ thống.</p>
+
+          <div class="instruction-cards">
+            <div class="instruction-card">
+              <div class="inst-num">5.1</div>
+              <div class="inst-content">
+                <div class="inst-title">Mở bảng Cài đặt Fanpage & Token</div>
+                <p class="inst-desc">Bấm nút bên dưới để mở ngay cửa sổ cấu hình trên website này:</p>
+                <div style="margin-top: 0.5rem;">
+                  <button type="button" id="btnQuickOpenSettings" class="btn btn-primary" style="font-weight: 600;">
+                    ⚙️ Mở Cửa Sổ Cài Đặt Ngay
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="instruction-card">
+              <div class="inst-num">5.2</div>
+              <div class="inst-content">
+                <div class="inst-title">Dán thông tin và bấm "Kiểm tra quyền Token"</div>
+                <p class="inst-desc">
+                  1. Dán <strong>Page ID</strong> (từ Bước 2) vào ô <em>ID Fanpage</em>.<br>
+                  2. Dán chuỗi <strong>Access Token</strong> (từ Bước 4) vào ô <em>Facebook Access Token</em>.<br>
+                  3. Bấm nút <strong>🔍 Kiểm tra quyền Token</strong>.<br>
+                  4. Hệ thống sẽ tự động xác thực và hiển thị tích xanh ✅ cho cả 4 quyền cốt lõi.
+                </p>
+              </div>
+            </div>
+
+            <div class="instruction-card">
+              <div class="inst-num">5.3</div>
+              <div class="inst-content">
+                <div class="inst-title">Bấm "Lưu cấu hình" & Bắt đầu lấy bài viết</div>
+                <p class="inst-desc">
+                  - Nhấn nút <strong>Lưu cấu hình</strong>. Dữ liệu sẽ được lưu an toàn vào tệp <code>.env</code> trên máy chủ.<br>
+                  - Quay lại màn hình chính, nhấn nút <strong>Lấy bài viết mới</strong> để hệ thống kéo về toàn bộ bài viết, likes, comments, shares và biểu đồ phân tích!
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border); padding: 0.85rem 1.25rem; background: rgba(15, 23, 42, 0.6);">
+        <div style="display: flex; gap: 0.5rem;">
+          <button type="button" id="btnGuidePrev" class="btn btn-secondary btn-sm" style="display: none;">← Bước trước</button>
+          <button type="button" id="btnGuideNext" class="btn btn-primary btn-sm">Bước tiếp theo ➜</button>
+        </div>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+          <button type="button" id="btnGuideGoSettings" class="btn btn-sm" style="background: rgba(234, 179, 8, 0.15); color: #facc15; border: 1px solid rgba(234, 179, 8, 0.4); font-weight: 600;">
+            ⚙️ Mở Cài Đặt Dán Token
+          </button>
+          <button type="button" id="btnDismissTokenGuide" class="btn btn-secondary btn-sm">Đóng</button>
         </div>
       </div>
     </div>
