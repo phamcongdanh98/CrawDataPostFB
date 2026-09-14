@@ -389,6 +389,40 @@ Mở trình duyệt bất kỳ và truy cập: 👉 **[http://localhost:3000](ht
    * Bấm **"🔔 Thử gửi Telegram"** để nhận ngay tin nhắn chào mừng kiểm tra kết nối.
    * Bấm **"⚡ Chạy ngay"** để kích hoạt chu trình đồng bộ tức thì.
    * Sau mỗi đợt quét tự động hoàn tất, hệ thống sẽ tự động gửi báo cáo KPI tổng kết trực tiếp vào kênh/nhóm Telegram của bạn!
+10. **Hệ thống Tài Khoản & Xác Thực Email / Gmail (Sẵn sàng Production - MỚI):**
+   * **Cơ sở dữ liệu Người dùng chuẩn bảo mật:** Lưu trữ trong SQLite (`users`, `email_verifications`, `user_sessions`) với mật khẩu băm một chiều an toàn bằng `bcryptjs` (salt 10 rounds).
+   * **Xác thực Email kích hoạt bằng OTP 6 chữ số:** Gửi mã xác nhận qua giao thức SMTP Gmail (hiệu lực 15 phút, chống spam gửi lại sau 60s).
+   * **Chế độ Dev Fallback Simulator:** Khi chưa cấu hình mật khẩu ứng dụng Gmail, hệ thống tự động in mã OTP ra Terminal giúp phát triển và test tính năng offline mượt mà.
+   * **Quên mật khẩu & Khôi phục an toàn:** Hỗ trợ quy trình cấp lại mã OTP qua email để đặt lại mật khẩu mới.
+   * **Quản trị Phiên (Session Bearer Token):** Hệ thống cấp phát token phiên có thời hạn 30 ngày, tự động gắn vào Header `Authorization: Bearer <token>` để bảo vệ các thao tác quản trị.
+11. **Bảng Điều Khiển Quản Trị Hệ Thống (Admin Control Center - MỚI):**
+   * **Tài khoản Admin mặc định sẵn sàng:** Khởi tạo tự động khi chạy máy chủ với toàn quyền quản trị:
+     - 📧 **Email:** `admin@gmail.com`
+     - 🔑 **Mật khẩu:** `Admin@123456`
+     - 👑 **Vai trò:** `admin` (Đã kích hoạt sẵn 100%, có thể đăng nhập ngay).
+   * **Bảng điều khiển trực quan (Admin Dashboard):** Nút **`🛡️ Quản Trị Admin`** xuất hiện riêng cho Admin trên Header.
+   * **Quản lý danh sách thành viên:** Tìm kiếm theo tên/email, lọc theo vai trò, phân quyền `Admin` ⇋ `User`, kích hoạt hoặc khóa tài khoản chỉ với 1 cú click.
+   * **Thêm tài khoản trực tiếp:** Admin có thể tạo ngay tài khoản mới (Admin hoặc User) kích hoạt tức thì mà không cần chờ người dùng xác nhận OTP qua email.
+
+---
+
+### 📧 HƯỚNG DẪN CẤU HÌNH GMAIL SMTP ĐỂ GỬI EMAIL THẬT
+
+Để hệ thống có thể gửi mã xác nhận OTP về địa chỉ Gmail của người đăng ký, bạn cần tạo **Mật khẩu ứng dụng (Google App Password)** theo các bước sau:
+
+1. Truy cập trang bảo mật tài khoản Google: 👉 **[https://myaccount.google.com/security](https://myaccount.google.com/security)**.
+2. Đảm bảo bạn đã **Bật Xác minh 2 bước (2-Step Verification)**.
+3. Truy cập trực tiếp link tạo mật khẩu ứng dụng: 👉 **[https://myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)**.
+4. Đặt tên ứng dụng (Ví dụ: `Facebook Fanpage Stat`) -> Nhấn **Tạo (Create)**.
+5. Google sẽ hiển thị một mật khẩu gồm **16 chữ cái** (dạng `abcd efgh ijkl mnop`).
+6. Có 2 cách kích hoạt trong ứng dụng:
+   * **Cách 1 (Ngay trên giao diện web):** Bấm nút **"👤 Đăng nhập"** -> Chọn tab **"⚙️ Cài Gmail"** -> Điền địa chỉ Gmail & Mật khẩu 16 chữ cái -> Bấm **"Thử kết nối"** -> Bấm **"Lưu cấu hình"**.
+   * **Cách 2 (Qua file `.env`):** Thêm các dòng sau vào file `.env`:
+     ```env
+     SMTP_USER=email_cua_ban@gmail.com
+     SMTP_PASS=abcdefghijklmnop
+     SMTP_FROM="Hệ Thống Thống Kê Fanpage <email_cua_ban@gmail.com>"
+     ```
 
 ---
 
@@ -397,7 +431,7 @@ Mở trình duyệt bất kỳ và truy cập: 👉 **[http://localhost:3000](ht
 | Lệnh PowerShell | Mô Tả Chức Năng | Khi Nào Sử Dụng? |
 |---|---|---|
 | `npm start` | Bật máy chủ Web Dashboard `localhost:3000` | Sử dụng hàng ngày để làm việc trên giao diện web |
-| `npm test` | Chạy bộ 25 bài kiểm thử tự động toàn diện | Kiểm tra hệ thống, test token, test kết nối DB |
+| `npm test` | Chạy bộ 59 bài kiểm thử tự động toàn diện (Bao gồm Auth DB, Email & Admin API) | Kiểm tra hệ thống, test token, test kết nối DB |
 | `npm run login` | Mở Chromium để đăng nhập nick Admin & chuyển sang Page | Làm 1 lần đầu tiên hoặc khi đăng xuất |
 | `npm run publishers` | Quét người đăng cho các bài viết đang chờ (`PENDING`) | Chạy ngầm qua dòng lệnh nếu không mở web |
 | `npm run publishers -- --force` | Quét lại toàn bộ bài viết từ đầu | Khi muốn cập nhật lại toàn bộ tên Admin |

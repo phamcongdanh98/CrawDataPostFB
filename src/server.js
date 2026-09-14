@@ -10,12 +10,25 @@ const { detectPublisher } = require('./publisher-detector');
 const { resolvePageAccessToken } = require('./token-resolver');
 const { testTelegramConnection } = require('./telegram-service');
 const autoSyncScheduler = require('./auto-sync-scheduler');
+const authService = require('./auth-service');
+const { testSmtpConnection } = require('./email-service');
 
 const app = express();
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.resolve(__dirname, '..', 'public')));
+
+// Middleware trích xuất token phiên đăng nhập (Bearer Token)
+app.use((req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7).trim();
+    req.user = authService.getCurrentUser(token);
+    req.token = token;
+  }
+  next();
+});
 
 /**
  * 1. Health check
@@ -797,13 +810,261 @@ app.post('/api/automation/run-now', async (req, res) => {
   }
 });
 
+/**
+ * 15. Hệ Thống Xác Thực Người Dùng & Email Verification (Auth API)
+ */
+// 15.1 Đăng ký tài khoản mới & gửi OTP
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { email, password, fullName } = req.body;
+    const result = await authService.register({ email, password, fullName });
+    if (!result.ok) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 15.2 Xác thực OTP kích hoạt tài khoản
+app.post('/api/auth/verify-email', async (req, res) => {
+  try {
+    const { email, code } = req.body;
+    const result = await authService.verifyEmail({ email, code });
+    if (!result.ok) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 15.3 Gửi lại mã OTP
+app.post('/api/auth/resend-code', async (req, res) => {
+  try {
+    const { email } = req.body;
+    const result = await authService.resendVerificationCode({ email });
+    if (!result.ok) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 15.4 Đăng nhập
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const result = await authService.login({ email, password });
+    if (!result.ok) {
+      return res.status(401).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 15.5 Đăng xuất
+app.post('/api/auth/logout', (req, res) => {
+  try {
+    const token = req.token || (req.headers['authorization'] || '').replace('Bearer ', '').trim();
+    const result = authService.logout(token);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 15.6 Lấy thông tin tài khoản hiện tại
+app.get('/api/auth/me', (req, res) => {
+  if (req.user) {
+    return res.json({ ok: true, user: req.user });
+  }
+  res.json({ ok: false, user: null, message: 'Chưa đăng nhập' });
+});
+
+// 15.7 Quên mật khẩu
+app.post('/api/auth/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    const result = await authService.forgotPassword(email);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 15.8 Đặt lại mật khẩu
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { email, code, newPassword } = req.body;
+    const result = await authService.resetPassword({ email, code, newPassword });
+    if (!result.ok) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 15.9 Trạng thái cấu hình SMTP Gmail
+app.get('/api/auth/smtp-status', (req, res) => {
+  res.json({
+    ok: true,
+    isConfigured: config.isSmtpConfigured(),
+    host: config.SMTP_HOST,
+    port: config.SMTP_PORT,
+    user: config.SMTP_USER ? config.SMTP_USER.replace(/(.{2})(.*)(@.*)/, '$1***$3') : null
+  });
+});
+
+// 15.10 Kiểm tra hoặc cập nhật cài đặt SMTP
+app.post('/api/auth/test-smtp', async (req, res) => {
+  try {
+    const { host, port, user, pass, saveConfig } = req.body;
+    const testConfig = {
+      host: host || config.SMTP_HOST,
+      port: parseInt(port, 10) || config.SMTP_PORT,
+      user: user || config.SMTP_USER,
+      pass: pass || config.SMTP_PASS
+    };
+
+    const testRes = await testSmtpConnection(testConfig);
+
+    if (testRes.ok && saveConfig && user && pass) {
+      config.updateEnvConfig({
+        SMTP_HOST: testConfig.host,
+        SMTP_PORT: testConfig.port,
+        SMTP_USER: testConfig.user,
+        SMTP_PASS: testConfig.pass
+      });
+      testRes.message += ' (Đã lưu cấu hình vào file .env)';
+    }
+
+    res.json(testRes);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/**
+ * 16. Hệ Thống Quản Trị Hệ Thống (Admin API)
+ */
+// Middleware kiểm tra quyền Quản trị viên (Admin)
+function requireAdmin(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ ok: false, error: 'Yêu cầu đăng nhập để thực hiện chức năng này.' });
+  }
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ ok: false, error: 'Quyền truy cập bị từ chối. Chỉ dành cho Quản trị viên (Admin).' });
+  }
+  next();
+}
+
+// 16.1 Lấy các chỉ số thống kê tổng quan hệ thống
+app.get('/api/admin/stats', requireAdmin, (req, res) => {
+  try {
+    const result = authService.getAdminOverview();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 16.2 Lấy danh sách thành viên (có tìm kiếm & phân trang)
+app.get('/api/admin/users', requireAdmin, (req, res) => {
+  try {
+    const { search, role, page, limit } = req.query;
+    const result = authService.adminListUsers({ search, role, page, limit });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 16.3 Admin tạo trực tiếp người dùng mới
+app.post('/api/admin/users', requireAdmin, async (req, res) => {
+  try {
+    const { email, password, fullName, role, isVerified } = req.body;
+    const result = await authService.adminCreateUser({ email, password, fullName, role, isVerified });
+    if (!result.ok) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 16.4 Admin cập nhật vai trò người dùng (Admin <-> User)
+app.patch('/api/admin/users/:id/role', requireAdmin, (req, res) => {
+  try {
+    const { role } = req.body;
+    const result = authService.adminUpdateUserRole(req.params.id, role, req.user.id);
+    if (!result.ok) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 16.5 Admin kích hoạt hoặc tạm khóa tài khoản
+app.patch('/api/admin/users/:id/status', requireAdmin, (req, res) => {
+  try {
+    const { isVerified } = req.body;
+    const result = authService.adminToggleUserStatus(req.params.id, !!isVerified, req.user.id);
+    if (!result.ok) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 16.6 Admin xóa vĩnh viễn tài khoản người dùng
+app.delete('/api/admin/users/:id', requireAdmin, (req, res) => {
+  try {
+    const result = authService.adminDeleteUser(req.params.id, req.user.id);
+    if (!result.ok) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 let server = null;
 if (require.main === module) {
-  server = app.listen(config.PORT, () => {
+  server = app.listen(config.PORT, async () => {
     console.log(`\n======================================================`);
     console.log(`🚀 Fanpage Publisher Stat Server đang chạy tại:`);
     console.log(`👉 http://localhost:${config.PORT}`);
     console.log(`======================================================\n`);
+
+    // Tự động seed tài khoản admin nếu chưa có
+    try {
+      const seedRes = await authService.seedAdminAccount();
+      if (seedRes.created) {
+        console.log(`👑 [KHỞI TẠO TÀI KHOẢN ADMIN MẶC ĐỊNH]`);
+        console.log(`👉 Email:    ${seedRes.email}`);
+        console.log(`👉 Mật khẩu: ${seedRes.password}`);
+        console.log(`👉 Vai trò:  Quản trị viên (admin - Đã kích hoạt 100%)\n`);
+      } else {
+        console.log(`👑 [TÀI KHOẢN ADMIN]: Đã sẵn sàng trong hệ thống (Email: ${seedRes.email}).\n`);
+      }
+    } catch (seedErr) {
+      console.error('[Admin] Lỗi seed tài khoản:', seedErr.message);
+    }
 
     // Khởi động scheduler hẹn giờ tự động
     autoSyncScheduler.startScheduler();
@@ -833,8 +1094,10 @@ if (require.main === module) {
   process.on('SIGTERM', shutdown);
 }
 
-// Khởi tạo Database khi server start
+// Khởi tạo Database và tự động tạo admin khi import
 db.getDb();
+authService.seedAdminAccount().catch(() => {});
 
-module.exports = { app, server };
+module.exports = { app, server, requireAdmin };
+
 

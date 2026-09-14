@@ -2761,11 +2761,976 @@ if (btnTriggerAutoNow) {
 }
 
 // ==========================================================================
+// USER AUTHENTICATION & EMAIL VERIFICATION MODULE
+// ==========================================================================
+
+const AUTH_TOKEN_KEY = 'fb_stat_auth_token';
+let currentPendingEmail = '';
+let resendTimerInterval = null;
+
+// DOM Elements
+const btnOpenAuthModal = document.getElementById('btnOpenAuthModal');
+const btnAuthText = document.getElementById('btnAuthText');
+const userProfileBadge = document.getElementById('userProfileBadge');
+const userAvatarText = document.getElementById('userAvatarText');
+const userNameText = document.getElementById('userNameText');
+const userRoleBadge = document.getElementById('userRoleBadge');
+const btnLogout = document.getElementById('btnLogout');
+
+const authModal = document.getElementById('authModal');
+const btnCloseAuthModal = document.getElementById('btnCloseAuthModal');
+const authModalTitle = document.getElementById('authModalTitle');
+const authAlertBox = document.getElementById('authAlertBox');
+const authNavTabs = document.getElementById('authNavTabs');
+
+const tabAuthLogin = document.getElementById('tabAuthLogin');
+const tabAuthRegister = document.getElementById('tabAuthRegister');
+const tabAuthSmtp = document.getElementById('tabAuthSmtp');
+
+const authViewLogin = document.getElementById('authViewLogin');
+const authViewRegister = document.getElementById('authViewRegister');
+const authViewVerify = document.getElementById('authViewVerify');
+const authViewForgot = document.getElementById('authViewForgot');
+const authViewSmtp = document.getElementById('authViewSmtp');
+
+// Login Form
+const loginEmail = document.getElementById('loginEmail');
+const loginPassword = document.getElementById('loginPassword');
+const btnSubmitLogin = document.getElementById('btnSubmitLogin');
+const linkToForgot = document.getElementById('linkToForgot');
+const linkToRegister = document.getElementById('linkToRegister');
+
+// Register Form
+const registerName = document.getElementById('registerName');
+const registerEmail = document.getElementById('registerEmail');
+const registerPassword = document.getElementById('registerPassword');
+const registerConfirmPassword = document.getElementById('registerConfirmPassword');
+const btnSubmitRegister = document.getElementById('btnSubmitRegister');
+const linkToLogin = document.getElementById('linkToLogin');
+
+// Verify OTP View
+const verifyEmailDisplay = document.getElementById('verifyEmailDisplay');
+const otpInput = document.getElementById('otpInput');
+const btnSubmitVerify = document.getElementById('btnSubmitVerify');
+const btnResendOtp = document.getElementById('btnResendOtp');
+const btnBackFromVerify = document.getElementById('btnBackFromVerify');
+
+// Forgot Password View
+const forgotEmail = document.getElementById('forgotEmail');
+const forgotResetFields = document.getElementById('forgotResetFields');
+const forgotOtpCode = document.getElementById('forgotOtpCode');
+const forgotNewPassword = document.getElementById('forgotNewPassword');
+const btnSubmitForgot = document.getElementById('btnSubmitForgot');
+const forgotBtnText = document.getElementById('forgotBtnText');
+const btnBackToLogin = document.getElementById('btnBackToLogin');
+
+// SMTP Settings View
+const smtpUser = document.getElementById('smtpUser');
+const smtpPass = document.getElementById('smtpPass');
+const btnTestSmtp = document.getElementById('btnTestSmtp');
+const btnSaveSmtp = document.getElementById('btnSaveSmtp');
+
+/**
+ * Lấy Bearer Authorization Header nếu có token
+ */
+function getAuthHeader() {
+  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+}
+
+/**
+ * Hiển thị thông báo trong Auth Modal
+ */
+function showAuthAlert(msg, type = 'error') {
+  if (!authAlertBox) return;
+  authAlertBox.style.display = 'block';
+  const isErr = type === 'error';
+  authAlertBox.style.background = isErr ? 'rgba(239, 68, 68, 0.12)' : 'rgba(16, 185, 129, 0.12)';
+  authAlertBox.style.borderColor = isErr ? 'rgba(239, 68, 68, 0.3)' : 'rgba(16, 185, 129, 0.3)';
+  authAlertBox.style.color = isErr ? '#fca5a5' : '#86efac';
+  authAlertBox.innerHTML = `<strong>${isErr ? '❌ Lỗi: ' : '✅ Thành công: '}</strong>${escapeHtml(msg)}`;
+}
+
+function hideAuthAlert() {
+  if (authAlertBox) {
+    authAlertBox.style.display = 'none';
+    authAlertBox.innerHTML = '';
+  }
+}
+
+/**
+ * Chuyển đổi màn hình trong Auth Modal
+ */
+function switchAuthView(viewName) {
+  hideAuthAlert();
+  [authViewLogin, authViewRegister, authViewVerify, authViewForgot, authViewSmtp].forEach(v => {
+    if (v) v.style.display = 'none';
+  });
+
+  // Quản lý hiển thị tab bar
+  const isMainTab = ['login', 'register', 'smtp'].includes(viewName);
+  if (authNavTabs) authNavTabs.style.display = isMainTab ? 'flex' : 'none';
+
+  if (tabAuthLogin) tabAuthLogin.classList.toggle('active', viewName === 'login');
+  if (tabAuthRegister) tabAuthRegister.classList.toggle('active', viewName === 'register');
+  if (tabAuthSmtp) tabAuthSmtp.classList.toggle('active', viewName === 'smtp');
+
+  if (viewName === 'login') {
+    if (authViewLogin) authViewLogin.style.display = 'block';
+    if (authModalTitle) authModalTitle.textContent = 'Đăng Nhập Tài Khoản';
+    if (loginEmail) loginEmail.focus();
+  } else if (viewName === 'register') {
+    if (authViewRegister) authViewRegister.style.display = 'block';
+    if (authModalTitle) authModalTitle.textContent = 'Đăng Ký Tài Khoản';
+    if (registerName) registerName.focus();
+  } else if (viewName === 'verify') {
+    if (authViewVerify) authViewVerify.style.display = 'block';
+    if (authModalTitle) authModalTitle.textContent = 'Xác Thực Email';
+    if (verifyEmailDisplay) verifyEmailDisplay.textContent = currentPendingEmail;
+    if (otpInput) {
+      otpInput.value = '';
+      otpInput.focus();
+    }
+  } else if (viewName === 'forgot') {
+    if (authViewForgot) authViewForgot.style.display = 'block';
+    if (authModalTitle) authModalTitle.textContent = 'Khôi Phục Mật Khẩu';
+    if (forgotResetFields) forgotResetFields.style.display = 'none';
+    if (forgotBtnText) forgotBtnText.textContent = 'Gửi Mã Khôi Phục';
+    if (forgotEmail) forgotEmail.focus();
+  } else if (viewName === 'smtp') {
+    if (authViewSmtp) authViewSmtp.style.display = 'block';
+    if (authModalTitle) authModalTitle.textContent = 'Cài Đặt Gmail SMTP';
+    fetchSmtpStatus();
+  }
+}
+
+function openAuthModal(defaultTab = 'login') {
+  if (authModal) {
+    authModal.style.display = 'flex';
+    switchAuthView(defaultTab);
+  }
+}
+
+function closeAuthModal() {
+  if (authModal) authModal.style.display = 'none';
+  hideAuthAlert();
+}
+
+// Modal open/close listeners
+if (btnOpenAuthModal) btnOpenAuthModal.addEventListener('click', () => openAuthModal('login'));
+if (btnCloseAuthModal) btnCloseAuthModal.addEventListener('click', closeAuthModal);
+if (authModal) {
+  authModal.addEventListener('click', (e) => {
+    if (e.target === authModal) closeAuthModal();
+  });
+}
+
+// Tab navigation listeners
+if (tabAuthLogin) tabAuthLogin.addEventListener('click', () => switchAuthView('login'));
+if (tabAuthRegister) tabAuthRegister.addEventListener('click', () => switchAuthView('register'));
+if (tabAuthSmtp) tabAuthSmtp.addEventListener('click', () => switchAuthView('smtp'));
+if (linkToRegister) linkToRegister.addEventListener('click', () => switchAuthView('register'));
+if (linkToLogin) linkToLogin.addEventListener('click', () => switchAuthView('login'));
+if (linkToForgot) linkToForgot.addEventListener('click', () => switchAuthView('forgot'));
+if (btnBackToLogin) btnBackToLogin.addEventListener('click', () => switchAuthView('login'));
+if (btnBackFromVerify) btnBackFromVerify.addEventListener('click', () => switchAuthView('register'));
+
+/**
+ * Kiểm tra trạng thái đăng nhập khi mở web
+ */
+async function checkAuthStatus() {
+  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  if (!token) {
+    renderLoggedOutState();
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/auth/me', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await res.json();
+
+    if (res.ok && data.ok && data.user) {
+      renderLoggedInState(data.user);
+    } else {
+      localStorage.removeItem(AUTH_TOKEN_KEY);
+      renderLoggedOutState();
+    }
+  } catch (err) {
+    console.warn('[Auth] Lỗi kiểm tra phiên đăng nhập:', err);
+  }
+}
+
+function renderLoggedInState(user) {
+  if (btnOpenAuthModal) btnOpenAuthModal.style.display = 'none';
+  if (userProfileBadge) userProfileBadge.style.display = 'inline-flex';
+
+  const btnOpenAdminModal = document.getElementById('btnOpenAdminModal');
+  if (btnOpenAdminModal) {
+    btnOpenAdminModal.style.display = user.role === 'admin' ? 'inline-flex' : 'none';
+  }
+
+  const name = user.fullName || user.email || 'Người dùng';
+  const initial = name.charAt(0).toUpperCase();
+
+  if (userAvatarText) userAvatarText.textContent = initial;
+  if (userNameText) userNameText.textContent = name;
+  if (userRoleBadge) {
+    userRoleBadge.textContent = user.role === 'admin' ? '👑 ADMIN' : 'USER';
+    userRoleBadge.style.color = user.role === 'admin' ? '#fbbf24' : '#818cf8';
+    userRoleBadge.style.fontWeight = user.role === 'admin' ? '700' : '500';
+  }
+}
+
+function renderLoggedOutState() {
+  if (btnOpenAuthModal) btnOpenAuthModal.style.display = 'inline-flex';
+  if (userProfileBadge) userProfileBadge.style.display = 'none';
+
+  const btnOpenAdminModal = document.getElementById('btnOpenAdminModal');
+  if (btnOpenAdminModal) btnOpenAdminModal.style.display = 'none';
+}
+
+// Xử lý ĐĂNG NHẬP
+if (btnSubmitLogin) {
+  btnSubmitLogin.addEventListener('click', async () => {
+    hideAuthAlert();
+    const email = loginEmail ? loginEmail.value.trim() : '';
+    const password = loginPassword ? loginPassword.value : '';
+
+    if (!email || !password) {
+      showAuthAlert('Vui lòng nhập đầy đủ Email và Mật khẩu.');
+      return;
+    }
+
+    const spinner = document.getElementById('loginSpinner');
+    btnSubmitLogin.disabled = true;
+    if (spinner) spinner.style.display = 'inline-block';
+
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.ok) {
+        localStorage.setItem(AUTH_TOKEN_KEY, data.token);
+        renderLoggedInState(data.user);
+        closeAuthModal();
+        showToast({
+          type: 'success',
+          title: `Xin chào ${data.user.fullName || data.user.email}!`,
+          message: 'Đăng nhập vào hệ thống thành công.'
+        });
+      } else if (data.requireVerification) {
+        // Tài khoản chưa xác thực email -> Chuyển sang màn hình nhập OTP
+        currentPendingEmail = data.email || email;
+        switchAuthView('verify');
+        let infoMsg = 'Tài khoản của bạn chưa được kích hoạt. Hãy nhập mã OTP 6 số để kích hoạt.';
+        if (data.simulatedCode) {
+          infoMsg += ` [Chế độ mô phỏng: Mã OTP của bạn là ${data.simulatedCode}]`;
+        }
+        showAuthAlert(infoMsg, 'info');
+      } else {
+        showAuthAlert(data.error || 'Email hoặc mật khẩu không chính xác.');
+      }
+    } catch (err) {
+      showAuthAlert(`Lỗi kết nối máy chủ: ${err.message}`);
+    } finally {
+      btnSubmitLogin.disabled = false;
+      if (spinner) spinner.style.display = 'none';
+    }
+  });
+}
+
+// Xử lý ĐĂNG KÝ
+if (btnSubmitRegister) {
+  btnSubmitRegister.addEventListener('click', async () => {
+    hideAuthAlert();
+    const fullName = registerName ? registerName.value.trim() : '';
+    const email = registerEmail ? registerEmail.value.trim() : '';
+    const password = registerPassword ? registerPassword.value : '';
+    const confirmPassword = registerConfirmPassword ? registerConfirmPassword.value : '';
+
+    if (!fullName) {
+      showAuthAlert('Vui lòng nhập họ và tên của bạn.');
+      return;
+    }
+    if (!email) {
+      showAuthAlert('Vui lòng nhập địa chỉ email.');
+      return;
+    }
+    if (!password || password.length < 6) {
+      showAuthAlert('Mật khẩu phải có độ dài tối thiểu 6 ký tự.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      showAuthAlert('Mật khẩu xác nhận không trùng khớp.');
+      return;
+    }
+
+    const spinner = document.getElementById('registerSpinner');
+    btnSubmitRegister.disabled = true;
+    if (spinner) spinner.style.display = 'inline-block';
+
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fullName, email, password })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.ok) {
+        currentPendingEmail = data.email || email;
+        switchAuthView('verify');
+        let successMsg = `Hệ thống đã gửi mã OTP kích hoạt tới email ${currentPendingEmail}. Vui lòng kiểm tra hộp thư!`;
+        if (data.simulatedCode) {
+          successMsg += ` (⚡ MÃ OTP MÔ PHỎNG: ${data.simulatedCode})`;
+        }
+        showAuthAlert(successMsg, 'success');
+      } else {
+        showAuthAlert(data.error || 'Đăng ký tài khoản không thành công.');
+      }
+    } catch (err) {
+      showAuthAlert(`Lỗi kết nối máy chủ: ${err.message}`);
+    } finally {
+      btnSubmitRegister.disabled = false;
+      if (spinner) spinner.style.display = 'none';
+    }
+  });
+}
+
+// Xử lý XÁC THỰC MÃ OTP
+if (btnSubmitVerify) {
+  btnSubmitVerify.addEventListener('click', async () => {
+    hideAuthAlert();
+    const code = otpInput ? otpInput.value.trim() : '';
+
+    if (!code || code.length !== 6) {
+      showAuthAlert('Vui lòng nhập đầy đủ 6 chữ số mã OTP.');
+      return;
+    }
+
+    const spinner = document.getElementById('verifySpinner');
+    btnSubmitVerify.disabled = true;
+    if (spinner) spinner.style.display = 'inline-block';
+
+    try {
+      const res = await fetch('/api/auth/verify-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: currentPendingEmail, code })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.ok) {
+        if (data.token) {
+          localStorage.setItem(AUTH_TOKEN_KEY, data.token);
+          renderLoggedInState(data.user);
+        }
+        closeAuthModal();
+        showToast({
+          type: 'success',
+          title: 'Kích hoạt tài khoản thành công! 🎉',
+          message: 'Tài khoản của bạn đã được xác minh. Chúc bạn có trải nghiệm tuyệt vời!'
+        });
+      } else {
+        showAuthAlert(data.error || 'Mã xác nhận không hợp lệ hoặc đã hết hạn.');
+      }
+    } catch (err) {
+      showAuthAlert(`Lỗi kết nối máy chủ: ${err.message}`);
+    } finally {
+      btnSubmitVerify.disabled = false;
+      if (spinner) spinner.style.display = 'none';
+    }
+  });
+}
+
+// Xử lý GỬI LẠI MÃ OTP (Resend OTP)
+if (btnResendOtp) {
+  btnResendOtp.addEventListener('click', async () => {
+    if (!currentPendingEmail) return;
+
+    btnResendOtp.disabled = true;
+    btnResendOtp.textContent = 'Đang gửi...';
+
+    try {
+      const res = await fetch('/api/auth/resend-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: currentPendingEmail })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.ok) {
+        let msg = 'Đã gửi mã OTP mới tới email của bạn.';
+        if (data.simulatedCode) msg += ` (⚡ MÃ OTP MÔ PHỎNG: ${data.simulatedCode})`;
+        showAuthAlert(msg, 'success');
+
+        // Bắt đầu đếm ngược 60 giây
+        let countdown = 60;
+        clearInterval(resendTimerInterval);
+        resendTimerInterval = setInterval(() => {
+          countdown--;
+          if (countdown > 0) {
+            btnResendOtp.textContent = `Gửi lại sau (${countdown}s)`;
+          } else {
+            clearInterval(resendTimerInterval);
+            btnResendOtp.disabled = false;
+            btnResendOtp.textContent = 'Chưa nhận được? Gửi lại mã';
+          }
+        }, 1000);
+      } else {
+        showAuthAlert(data.error || 'Không thể gửi lại mã.');
+        btnResendOtp.disabled = false;
+        btnResendOtp.textContent = 'Chưa nhận được? Gửi lại mã';
+      }
+    } catch (err) {
+      showAuthAlert(`Lỗi: ${err.message}`);
+      btnResendOtp.disabled = false;
+      btnResendOtp.textContent = 'Chưa nhận được? Gửi lại mã';
+    }
+  });
+}
+
+// Xử lý ĐĂNG XUẤT
+if (btnLogout) {
+  btnLogout.addEventListener('click', async () => {
+    const token = localStorage.getItem(AUTH_TOKEN_KEY);
+    if (token) {
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+      } catch (e) {}
+    }
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    renderLoggedOutState();
+    showToast({
+      type: 'info',
+      title: 'Đã đăng xuất',
+      message: 'Bạn đã đăng xuất khỏi phiên làm việc an toàn.'
+    });
+  });
+}
+
+// Xử lý QUÊN MẬT KHẨU
+if (btnSubmitForgot) {
+  btnSubmitForgot.addEventListener('click', async () => {
+    hideAuthAlert();
+    const email = forgotEmail ? forgotEmail.value.trim() : '';
+    if (!email) {
+      showAuthAlert('Vui lòng nhập địa chỉ email.');
+      return;
+    }
+
+    const isResetStep = forgotResetFields && forgotResetFields.style.display !== 'none';
+    const spinner = document.getElementById('forgotSpinner');
+    btnSubmitForgot.disabled = true;
+    if (spinner) spinner.style.display = 'inline-block';
+
+    try {
+      if (!isResetStep) {
+        // Bước 1: Gửi OTP khôi phục
+        const res = await fetch('/api/auth/forgot-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+          if (forgotResetFields) forgotResetFields.style.display = 'flex';
+          if (forgotBtnText) forgotBtnText.textContent = 'Đặt Lại Mật Khẩu Mới';
+          let msg = data.message || 'Mã OTP khôi phục đã được gửi tới email của bạn.';
+          if (data.simulatedCode) msg += ` (⚡ MÃ OTP MÔ PHỎNG: ${data.simulatedCode})`;
+          showAuthAlert(msg, 'success');
+        } else {
+          showAuthAlert(data.error || 'Có lỗi xảy ra.');
+        }
+      } else {
+        // Bước 2: Đổi mật khẩu với OTP
+        const code = forgotOtpCode ? forgotOtpCode.value.trim() : '';
+        const newPassword = forgotNewPassword ? forgotNewPassword.value : '';
+
+        if (!code || !newPassword || newPassword.length < 6) {
+          showAuthAlert('Vui lòng nhập đúng 6 số OTP và mật khẩu mới tối thiểu 6 ký tự.');
+          return;
+        }
+
+        const res = await fetch('/api/auth/reset-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, code, newPassword })
+        });
+        const data = await res.json();
+
+        if (res.ok && data.ok) {
+          showToast({
+            type: 'success',
+            title: 'Đặt lại mật khẩu thành công!',
+            message: 'Vui lòng đăng nhập bằng mật khẩu mới của bạn.'
+          });
+          switchAuthView('login');
+          if (loginEmail) loginEmail.value = email;
+          if (loginPassword) loginPassword.value = '';
+        } else {
+          showAuthAlert(data.error || 'Mã xác nhận không đúng hoặc đã hết hạn.');
+        }
+      }
+    } catch (err) {
+      showAuthAlert(`Lỗi kết nối: ${err.message}`);
+    } finally {
+      btnSubmitForgot.disabled = false;
+      if (spinner) spinner.style.display = 'none';
+    }
+  });
+}
+
+// Xử lý CÀI ĐẶT GMAIL SMTP
+async function fetchSmtpStatus() {
+  try {
+    const res = await fetch('/api/auth/smtp-status');
+    const data = await res.json();
+    if (res.ok && data.ok) {
+      if (data.isConfigured) {
+        showAuthAlert(`Hệ thống đang kết nối hòm thư: ${data.user || 'Gmail'} (Port ${data.port})`, 'success');
+      } else {
+        showAuthAlert('Hệ thống đang ở chế độ MÔ PHỎNG (in OTP ra terminal). Bạn có thể cấu hình Gmail bên dưới để gửi thư thật.', 'info');
+      }
+    }
+  } catch (e) {}
+}
+
+if (btnTestSmtp) {
+  btnTestSmtp.addEventListener('click', async () => {
+    hideAuthAlert();
+    const user = smtpUser ? smtpUser.value.trim() : '';
+    const pass = smtpPass ? smtpPass.value.trim() : '';
+
+    if (!user || !pass) {
+      showAuthAlert('Vui lòng nhập Email Gmail và Mật khẩu ứng dụng 16 chữ cái để kiểm tra.');
+      return;
+    }
+
+    const spinner = document.getElementById('testSmtpSpinner');
+    btnTestSmtp.disabled = true;
+    if (spinner) spinner.style.display = 'inline-block';
+
+    try {
+      const res = await fetch('/api/auth/test-smtp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user, pass, saveConfig: false })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.ok) {
+        showAuthAlert('Xác thực Gmail SMTP thành công 100%! Bạn có thể bấm "Lưu Cấu Hình".', 'success');
+      } else {
+        showAuthAlert(data.error || 'Không thể kết nối tới Gmail SMTP.', 'error');
+      }
+    } catch (err) {
+      showAuthAlert(`Lỗi kết nối: ${err.message}`);
+    } finally {
+      btnTestSmtp.disabled = false;
+      if (spinner) spinner.style.display = 'none';
+    }
+  });
+}
+
+if (btnSaveSmtp) {
+  btnSaveSmtp.addEventListener('click', async () => {
+    hideAuthAlert();
+    const user = smtpUser ? smtpUser.value.trim() : '';
+    const pass = smtpPass ? smtpPass.value.trim() : '';
+
+    if (!user || !pass) {
+      showAuthAlert('Vui lòng nhập Email Gmail và Mật khẩu ứng dụng để lưu.');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/auth/test-smtp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user, pass, saveConfig: true })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.ok) {
+        showToast({
+          type: 'success',
+          title: 'Lưu cấu hình Gmail thành công!',
+          message: 'Từ bây giờ, toàn bộ mã xác thực OTP sẽ được gửi trực tiếp tới email người dùng.'
+        });
+        showAuthAlert('Đã lưu thông tin Gmail SMTP thành công vào .env!', 'success');
+      } else {
+        showAuthAlert(data.error || 'Không thể lưu cấu hình.');
+      }
+    } catch (err) {
+      showAuthAlert(`Lỗi: ${err.message}`);
+    }
+  });
+}
+
+// ==========================================================================
+// MODULE 10: BẢNG ĐIỀU KHIỂN QUẢN TRỊ VIÊN HỆ THỐNG (ADMIN DASHBOARD)
+// ==========================================================================
+
+const btnOpenAdminModal = document.getElementById('btnOpenAdminModal');
+const adminDashboardModal = document.getElementById('adminDashboardModal');
+const btnCloseAdminModal = document.getElementById('btnCloseAdminModal');
+const adminAlertBox = document.getElementById('adminAlertBox');
+
+const adminTotalUsers = document.getElementById('adminTotalUsers');
+const adminTotalAdmins = document.getElementById('adminTotalAdmins');
+const adminTotalVerified = document.getElementById('adminTotalVerified');
+const adminTotalSessions = document.getElementById('adminTotalSessions');
+
+const adminSearchInput = document.getElementById('adminSearchInput');
+const adminRoleSelect = document.getElementById('adminRoleSelect');
+const btnRefreshAdmin = document.getElementById('btnRefreshAdmin');
+
+const btnToggleAddUserForm = document.getElementById('btnToggleAddUserForm');
+const adminAddUserPanel = document.getElementById('adminAddUserPanel');
+const formAdminCreateUser = document.getElementById('formAdminCreateUser');
+const newAdminFullName = document.getElementById('newAdminFullName');
+const newAdminEmail = document.getElementById('newAdminEmail');
+const newAdminPassword = document.getElementById('newAdminPassword');
+const newAdminRole = document.getElementById('newAdminRole');
+const newAdminVerified = document.getElementById('newAdminVerified');
+const btnCancelAddUser = document.getElementById('btnCancelAddUser');
+const btnSubmitAdminCreateUser = document.getElementById('btnSubmitAdminCreateUser');
+const createUserSpinner = document.getElementById('createUserSpinner');
+
+const adminUsersTableBody = document.getElementById('adminUsersTableBody');
+
+function getAuthHeaders() {
+  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': token ? `Bearer ${token}` : ''
+  };
+}
+
+function showAdminAlert(msg, type = 'error') {
+  if (!adminAlertBox) return;
+  adminAlertBox.textContent = msg;
+  adminAlertBox.className = `test-result-box ${type === 'success' ? 'test-result-success' : 'test-result-error'}`;
+  adminAlertBox.style.display = 'block';
+}
+
+function hideAdminAlert() {
+  if (!adminAlertBox) return;
+  adminAlertBox.style.display = 'none';
+}
+
+function openAdminDashboard() {
+  if (adminDashboardModal) adminDashboardModal.style.display = 'flex';
+  hideAdminAlert();
+  if (adminAddUserPanel) adminAddUserPanel.style.display = 'none';
+  loadAdminStats();
+  loadAdminUsers();
+}
+
+function closeAdminDashboard() {
+  if (adminDashboardModal) adminDashboardModal.style.display = 'none';
+}
+
+async function loadAdminStats() {
+  try {
+    const res = await fetch('/api/admin/stats', { headers: getAuthHeaders() });
+    const data = await res.json();
+    if (res.ok && data.ok && data.stats) {
+      if (adminTotalUsers) adminTotalUsers.textContent = data.stats.totalUsers || 0;
+      if (adminTotalAdmins) adminTotalAdmins.textContent = data.stats.adminCount || 0;
+      if (adminTotalVerified) adminTotalVerified.textContent = data.stats.verifiedCount || 0;
+      if (adminTotalSessions) adminTotalSessions.textContent = data.stats.activeSessions || 0;
+    }
+  } catch (err) {
+    console.error('Lỗi khi tải thống kê admin:', err);
+  }
+}
+
+async function loadAdminUsers() {
+  if (!adminUsersTableBody) return;
+  adminUsersTableBody.innerHTML = `
+    <tr>
+      <td colspan="5" style="padding: 2rem; text-align: center; color: var(--text-muted);">
+        <span class="spinner-sm" style="display: inline-block; vertical-align: middle; margin-right: 0.5rem;"></span>
+        Đang tải danh sách thành viên...
+      </td>
+    </tr>
+  `;
+
+  const search = adminSearchInput ? adminSearchInput.value.trim() : '';
+  const role = adminRoleSelect ? adminRoleSelect.value : '';
+
+  try {
+    const url = `/api/admin/users?search=${encodeURIComponent(search)}&role=${encodeURIComponent(role)}`;
+    const res = await fetch(url, { headers: getAuthHeaders() });
+    const data = await res.json();
+
+    if (!res.ok || !data.ok) {
+      showAdminAlert(data.error || 'Không thể tải danh sách người dùng.');
+      adminUsersTableBody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: #f87171; padding: 1rem;">Lỗi tải dữ liệu.</td></tr>`;
+      return;
+    }
+
+    const users = data.users || [];
+    if (users.length === 0) {
+      adminUsersTableBody.innerHTML = `
+        <tr>
+          <td colspan="5" style="padding: 2rem; text-align: center; color: var(--text-muted);">
+            Không tìm thấy thành viên nào phù hợp.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    adminUsersTableBody.innerHTML = '';
+    users.forEach(u => {
+      const tr = document.createElement('tr');
+      const initial = (u.full_name || u.email || 'U').charAt(0).toUpperCase();
+      const isAdmin = u.role === 'admin';
+      const isVerified = u.is_verified === 1;
+
+      const createdDate = u.created_at ? new Date(u.created_at).toLocaleString('vi-VN') : '---';
+
+      tr.innerHTML = `
+        <td style="padding: 0.85rem 1rem;">
+          <div class="admin-user-cell">
+            <span class="admin-avatar ${isAdmin ? 'admin-role' : ''}">${initial}</span>
+            <div>
+              <span class="admin-user-name">${escapeHtml(u.full_name || 'Chưa đặt tên')}</span>
+              <span class="admin-user-email">${escapeHtml(u.email)}</span>
+            </div>
+          </div>
+        </td>
+        <td style="padding: 0.85rem 1rem;">
+          <span class="role-badge ${isAdmin ? 'role-badge-admin' : 'role-badge-user'}">
+            ${isAdmin ? '👑 Quản Trị Viên' : '👤 Người Dùng'}
+          </span>
+        </td>
+        <td style="padding: 0.85rem 1rem;">
+          <span class="status-badge ${isVerified ? 'status-badge-verified' : 'status-badge-unverified'}">
+            ${isVerified ? '✅ Đã kích hoạt' : '⏳ Chờ xác nhận'}
+          </span>
+        </td>
+        <td style="padding: 0.85rem 1rem; color: var(--text-secondary); font-size: 0.8rem;">
+          ${createdDate}
+        </td>
+        <td style="padding: 0.85rem 1rem; text-align: right;">
+          <div style="display: inline-flex; gap: 0.4rem; justify-content: flex-end;">
+            <button type="button" class="btn-admin-action" data-action="toggle-role" data-id="${u.id}" data-role="${u.role}" data-name="${escapeHtml(u.full_name || u.email)}" title="${isAdmin ? 'Hạ quyền xuống User' : 'Nâng quyền thành Admin'}">
+              ${isAdmin ? '👤 Hạ User' : '👑 Lên Admin'}
+            </button>
+            <button type="button" class="btn-admin-action" data-action="toggle-status" data-id="${u.id}" data-verified="${u.is_verified}" data-name="${escapeHtml(u.full_name || u.email)}" title="${isVerified ? 'Tạm khóa tài khoản' : 'Kích hoạt ngay'}">
+              ${isVerified ? '🔒 Khóa' : '⚡ Kích hoạt'}
+            </button>
+            <button type="button" class="btn-admin-action btn-admin-action-danger" data-action="delete-user" data-id="${u.id}" data-email="${escapeHtml(u.email)}" title="Xóa tài khoản vĩnh viễn">
+              🗑️ Xóa
+            </button>
+          </div>
+        </td>
+      `;
+      adminUsersTableBody.appendChild(tr);
+    });
+
+  } catch (err) {
+    console.error('Lỗi khi tải danh sách users:', err);
+    adminUsersTableBody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: #f87171; padding: 1rem;">Lỗi kết nối.</td></tr>`;
+  }
+}
+
+// Xử lý các nút thao tác trên bảng thành viên (Event Delegation)
+if (adminUsersTableBody) {
+  adminUsersTableBody.addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+
+    const action = btn.dataset.action;
+    const userId = btn.dataset.id;
+    const name = btn.dataset.name;
+    const email = btn.dataset.email;
+
+    if (action === 'toggle-role') {
+      const currentRole = btn.dataset.role;
+      const targetRole = currentRole === 'admin' ? 'user' : 'admin';
+      const confirmText = `Bạn có chắc muốn đổi vai trò của "${name}" thành ${targetRole === 'admin' ? 'Quản Trị Viên (Admin)' : 'Người Dùng (User)'}?`;
+      if (!confirm(confirmText)) return;
+
+      try {
+        const res = await fetch(`/api/admin/users/${userId}/role`, {
+          method: 'PATCH',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ role: targetRole })
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          showToast({ type: 'success', title: 'Cập nhật thành công', message: data.message });
+          loadAdminStats();
+          loadAdminUsers();
+        } else {
+          showAdminAlert(data.error || 'Không thể cập nhật vai trò.');
+        }
+      } catch (err) {
+        showAdminAlert(`Lỗi: ${err.message}`);
+      }
+    } else if (action === 'toggle-status') {
+      const isCurrentlyVerified = btn.dataset.verified === '1';
+      const targetStatus = !isCurrentlyVerified;
+      const confirmText = `Xác nhận ${targetStatus ? 'KÍCH HOẠT' : 'TẠM KHÓA'} tài khoản "${name}"?`;
+      if (!confirm(confirmText)) return;
+
+      try {
+        const res = await fetch(`/api/admin/users/${userId}/status`, {
+          method: 'PATCH',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ isVerified: targetStatus })
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          showToast({ type: 'success', title: 'Thao tác thành công', message: data.message });
+          loadAdminStats();
+          loadAdminUsers();
+        } else {
+          showAdminAlert(data.error || 'Không thể thay đổi trạng thái.');
+        }
+      } catch (err) {
+        showAdminAlert(`Lỗi: ${err.message}`);
+      }
+    } else if (action === 'delete-user') {
+      const confirmText = `CẢNH BÁO: Bạn có chắc chắn muốn xóa vĩnh viễn tài khoản "${email}"?\nToàn bộ phiên đăng nhập và dữ liệu liên quan sẽ bị xóa sạch!`;
+      if (!confirm(confirmText)) return;
+
+      try {
+        const res = await fetch(`/api/admin/users/${userId}`, {
+          method: 'DELETE',
+          headers: getAuthHeaders()
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          showToast({ type: 'success', title: 'Đã xóa tài khoản', message: data.message });
+          loadAdminStats();
+          loadAdminUsers();
+        } else {
+          showAdminAlert(data.error || 'Không thể xóa tài khoản.');
+        }
+      } catch (err) {
+        showAdminAlert(`Lỗi: ${err.message}`);
+      }
+    }
+  });
+}
+
+// Các sự kiện cho Admin Dashboard
+if (btnOpenAdminModal) btnOpenAdminModal.addEventListener('click', openAdminDashboard);
+if (btnCloseAdminModal) btnCloseAdminModal.addEventListener('click', closeAdminDashboard);
+if (btnRefreshAdmin) {
+  btnRefreshAdmin.addEventListener('click', () => {
+    loadAdminStats();
+    loadAdminUsers();
+  });
+}
+
+if (adminSearchInput) {
+  let searchTimeout = null;
+  adminSearchInput.addEventListener('input', () => {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(loadAdminUsers, 300);
+  });
+}
+
+if (adminRoleSelect) {
+  adminRoleSelect.addEventListener('change', loadAdminUsers);
+}
+
+if (btnToggleAddUserForm) {
+  btnToggleAddUserForm.addEventListener('click', () => {
+    if (!adminAddUserPanel) return;
+    const isHidden = adminAddUserPanel.style.display === 'none';
+    adminAddUserPanel.style.display = isHidden ? 'block' : 'none';
+    if (isHidden && newAdminFullName) newAdminFullName.focus();
+  });
+}
+
+if (btnCancelAddUser) {
+  btnCancelAddUser.addEventListener('click', () => {
+    if (adminAddUserPanel) adminAddUserPanel.style.display = 'none';
+  });
+}
+
+// Xử lý tạo tài khoản mới từ Admin
+if (btnSubmitAdminCreateUser) {
+  btnSubmitAdminCreateUser.addEventListener('click', async () => {
+    hideAdminAlert();
+    const fullName = newAdminFullName ? newAdminFullName.value.trim() : '';
+    const email = newAdminEmail ? newAdminEmail.value.trim() : '';
+    const password = newAdminPassword ? newAdminPassword.value : '';
+    const role = newAdminRole ? newAdminRole.value : 'user';
+    const isVerified = newAdminVerified ? newAdminVerified.checked : true;
+
+    if (!fullName || !email || !password) {
+      showAdminAlert('Vui lòng điền đầy đủ Họ tên, Email và Mật khẩu.');
+      return;
+    }
+
+    if (password.length < 6) {
+      showAdminAlert('Mật khẩu phải có độ dài tối thiểu 6 ký tự.');
+      return;
+    }
+
+    btnSubmitAdminCreateUser.disabled = true;
+    if (createUserSpinner) createUserSpinner.style.display = 'inline-block';
+
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ fullName, email, password, role, isVerified })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.ok) {
+        showToast({
+          type: 'success',
+          title: 'Tạo tài khoản thành công!',
+          message: `Đã tạo tài khoản cho ${email} (${role.toUpperCase()}).`
+        });
+        showAdminAlert(`Đã tạo thành công tài khoản: ${email}`, 'success');
+
+        // Reset form
+        if (formAdminCreateUser) formAdminCreateUser.reset();
+        if (adminAddUserPanel) adminAddUserPanel.style.display = 'none';
+
+        loadAdminStats();
+        loadAdminUsers();
+      } else {
+        showAdminAlert(data.error || 'Không thể tạo tài khoản.');
+      }
+    } catch (err) {
+      showAdminAlert(`Lỗi kết nối: ${err.message}`);
+    } finally {
+      btnSubmitAdminCreateUser.disabled = false;
+      if (createUserSpinner) createUserSpinner.style.display = 'none';
+    }
+  });
+}
+
+// ==========================================================================
 // KHỞI CHẠY ỨNG DỤNG (INITIALIZATION)
 // ==========================================================================
 window.addEventListener('DOMContentLoaded', () => {
   initDefaultDates();
   checkConfigStatus();
+  checkAuthStatus();
   updateSortIndicators();
   fetchStats();
   fetchPosts();
@@ -2777,4 +3742,5 @@ window.addEventListener('DOMContentLoaded', () => {
     if (j.isRunning) startJobPolling();
   }).catch(() => {});
 });
+
 

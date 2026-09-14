@@ -69,6 +69,29 @@
               <span>Xuất CSV</span>
             </a>
           </div>
+
+          <!-- Khu vực Tài khoản & Xác thực -->
+          <div class="user-auth-wrap" style="display: flex; align-items: center; gap: 0.5rem;">
+            <!-- Nút Quản trị Admin (chỉ hiện khi đăng nhập là admin) -->
+            <button id="btnOpenAdminModal" type="button" class="btn" style="display: none; background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); padding: 0.45rem 0.85rem; font-weight: 600;" title="Mở Bảng Điều Khiển Quản Trị Hệ Thống">
+              <span>🛡️ Quản Trị Admin</span>
+            </button>
+
+            <button id="btnOpenAuthModal" class="btn btn-primary" title="Đăng nhập hoặc đăng ký tài khoản người dùng">
+              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+              <span id="btnAuthText">Đăng nhập</span>
+            </button>
+            <div id="userProfileBadge" class="user-pill" style="display: none;">
+              <span class="user-avatar-sm" id="userAvatarText">U</span>
+              <div class="user-info-text">
+                <span id="userNameText" class="user-name">Người dùng</span>
+                <span id="userRoleBadge" class="user-role-tag">user</span>
+              </div>
+              <button id="btnLogout" class="btn-logout-icon" title="Đăng xuất tài khoản">
+                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </header>
@@ -925,6 +948,302 @@
             <span id="saveAutoSpinner" class="spinner-sm" style="display: none;"></span>
             <span>💾 Lưu cấu hình (.env)</span>
           </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Xác Thực Người Dùng & Quản Lý Tài Khoản (User Authentication Modal) -->
+  <div id="authModal" class="modal-overlay" style="display: none;">
+    <div class="modal-card" style="max-width: 480px;">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <span class="modal-icon" style="color: #6366f1;">🔐</span>
+          <div>
+            <h3 id="authModalTitle">Tài Khoản & Xác Thực</h3>
+            <p class="text-muted" style="font-size: 0.8rem; margin: 0;">Đăng nhập để quản lý và lưu trữ dữ liệu an toàn</p>
+          </div>
+        </div>
+        <button id="btnCloseAuthModal" class="btn-close">✕</button>
+      </div>
+
+      <!-- Tabs chọn chế độ (Login / Register / SMTP Setup) -->
+      <div class="auth-nav-tabs" id="authNavTabs" style="display: flex; border-bottom: 1px solid var(--border); background: rgba(15, 23, 42, 0.4);">
+        <button type="button" id="tabAuthLogin" class="auth-tab-btn active" style="flex: 1; padding: 0.65rem; border: none; background: transparent; color: #38bdf8; font-weight: 600; font-size: 0.85rem; cursor: pointer; border-bottom: 2px solid #38bdf8;">Đăng Nhập</button>
+        <button type="button" id="tabAuthRegister" class="auth-tab-btn" style="flex: 1; padding: 0.65rem; border: none; background: transparent; color: var(--text-secondary); font-weight: 500; font-size: 0.85rem; cursor: pointer;">Đăng Ký</button>
+        <button type="button" id="tabAuthSmtp" class="auth-tab-btn" style="flex: 1; padding: 0.65rem; border: none; background: transparent; color: var(--text-secondary); font-weight: 500; font-size: 0.85rem; cursor: pointer;" title="Cài đặt hòm thư Gmail để gửi email kích hoạt">⚙️ Cài Gmail</button>
+      </div>
+
+      <div class="modal-body" style="padding: 1.25rem;">
+        <!-- Alert Box thông báo lỗi / thành công -->
+        <div id="authAlertBox" class="test-result-box" style="display: none; margin-bottom: 1rem;"></div>
+
+        <!-- 1. FORM ĐĂNG NHẬP -->
+        <div id="authViewLogin" class="auth-view">
+          <form id="formLogin" onsubmit="return false;">
+            <div class="control-group" style="margin-bottom: 0.85rem;">
+              <label for="loginEmail" class="form-label">Địa chỉ Email:</label>
+              <input type="email" id="loginEmail" placeholder="admin@example.com" class="input-full" required autocomplete="username">
+            </div>
+            <div class="control-group" style="margin-bottom: 0.85rem;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <label for="loginPassword" class="form-label">Mật khẩu:</label>
+                <button type="button" id="linkToForgot" class="link-btn" style="font-size: 0.75rem; color: #38bdf8;">Quên mật khẩu?</button>
+              </div>
+              <input type="password" id="loginPassword" placeholder="••••••••" class="input-full" required autocomplete="current-password">
+            </div>
+            <button type="button" id="btnSubmitLogin" class="btn btn-primary" style="width: 100%; justify-content: center; padding: 0.75rem; margin-top: 0.5rem;">
+              <span id="loginSpinner" class="spinner-sm" style="display: none;"></span>
+              <span>Đăng Nhập</span>
+            </button>
+            <div style="text-align: center; margin-top: 1rem; font-size: 0.82rem; color: var(--text-secondary);">
+              Chưa có tài khoản? <button type="button" id="linkToRegister" class="link-btn" style="color: #38bdf8; font-weight: 600;">Đăng ký ngay ➜</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- 2. FORM ĐĂNG KÝ -->
+        <div id="authViewRegister" class="auth-view" style="display: none;">
+          <form id="formRegister" onsubmit="return false;">
+            <div class="control-group" style="margin-bottom: 0.75rem;">
+              <label for="registerName" class="form-label">Họ và tên của bạn:</label>
+              <input type="text" id="registerName" placeholder="Nguyễn Văn A" class="input-full" required>
+            </div>
+            <div class="control-group" style="margin-bottom: 0.75rem;">
+              <label for="registerEmail" class="form-label">Địa chỉ Email xác nhận:</label>
+              <input type="email" id="registerEmail" placeholder="name@gmail.com" class="input-full" required autocomplete="username">
+              <small class="form-hint">Mã OTP 6 số sẽ được gửi tới email này để kích hoạt.</small>
+            </div>
+            <div class="control-group" style="margin-bottom: 0.75rem;">
+              <label for="registerPassword" class="form-label">Mật khẩu:</label>
+              <input type="password" id="registerPassword" placeholder="Tối thiểu 6 ký tự" class="input-full" required minlength="6" autocomplete="new-password">
+            </div>
+            <div class="control-group" style="margin-bottom: 0.85rem;">
+              <label for="registerConfirmPassword" class="form-label">Nhập lại mật khẩu:</label>
+              <input type="password" id="registerConfirmPassword" placeholder="Nhập lại chính xác mật khẩu trên" class="input-full" required minlength="6" autocomplete="new-password">
+            </div>
+            <button type="button" id="btnSubmitRegister" class="btn btn-primary" style="width: 100%; justify-content: center; padding: 0.75rem;">
+              <span id="registerSpinner" class="spinner-sm" style="display: none;"></span>
+              <span>Đăng Ký & Nhận Mã OTP</span>
+            </button>
+            <div style="text-align: center; margin-top: 1rem; font-size: 0.82rem; color: var(--text-secondary);">
+              Đã có tài khoản? <button type="button" id="linkToLogin" class="link-btn" style="color: #38bdf8; font-weight: 600;">Đăng nhập ngay ➜</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- 3. MÀN HÌNH NHẬP MÃ OTP XÁC THỰC EMAIL -->
+        <div id="authViewVerify" class="auth-view" style="display: none; text-align: center;">
+          <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">📩</div>
+          <h4 style="color: #38bdf8; margin: 0 0 0.5rem 0; font-size: 1.05rem;">Xác Thực Địa Chỉ Email</h4>
+          <p style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.5; margin-bottom: 1.25rem;">
+            Hệ thống đã gửi một mã OTP gồm 6 chữ số tới hòm thư:<br>
+            <strong id="verifyEmailDisplay" style="color: #f1f5f9; font-size: 0.9rem;">user@gmail.com</strong>
+          </p>
+
+          <div style="margin-bottom: 1.25rem;">
+            <input type="text" id="otpInput" maxlength="6" placeholder="------" style="width: 220px; font-size: 1.8rem; font-weight: 800; letter-spacing: 10px; text-align: center; padding: 0.6rem; background: #090d16; border: 2px solid #38bdf8; border-radius: 8px; color: #38bdf8; font-family: monospace;">
+            <small class="form-hint" style="display: block; margin-top: 0.5rem;">Nhập đúng 6 chữ số được gửi trong email (hiệu lực 15 phút)</small>
+          </div>
+
+          <button type="button" id="btnSubmitVerify" class="btn btn-primary" style="width: 100%; justify-content: center; padding: 0.75rem; font-weight: 600;">
+            <span id="verifySpinner" class="spinner-sm" style="display: none;"></span>
+            <span>Xác Nhận & Kích Hoạt Tài Khoản</span>
+          </button>
+
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1.25rem; font-size: 0.8rem;">
+            <button type="button" id="btnBackFromVerify" class="link-btn" style="color: var(--text-secondary);">← Quay lại</button>
+            <button type="button" id="btnResendOtp" class="link-btn" style="color: #38bdf8;">Chưa nhận được? Gửi lại mã</button>
+          </div>
+        </div>
+
+        <!-- 4. FORM QUÊN MẬT KHẨU -->
+        <div id="authViewForgot" class="auth-view" style="display: none;">
+          <h4 style="color: #f59e0b; margin: 0 0 0.5rem 0; font-size: 1rem;">Đặt Lại Mật Khẩu</h4>
+          <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 1rem;">Nhập email của bạn để nhận mã OTP đổi mật khẩu mới.</p>
+          <div class="control-group" style="margin-bottom: 0.85rem;">
+            <label for="forgotEmail" class="form-label">Email tài khoản:</label>
+            <input type="email" id="forgotEmail" placeholder="your_email@gmail.com" class="input-full">
+          </div>
+          <div id="forgotResetFields" style="display: none; flex-direction: column; gap: 0.75rem; margin-bottom: 0.85rem;">
+            <div class="control-group">
+              <label for="forgotOtpCode" class="form-label">Mã OTP nhận được:</label>
+              <input type="text" id="forgotOtpCode" placeholder="Nhập 6 số OTP" class="input-full">
+            </div>
+            <div class="control-group">
+              <label for="forgotNewPassword" class="form-label">Mật khẩu mới:</label>
+              <input type="password" id="forgotNewPassword" placeholder="Tối thiểu 6 ký tự" class="input-full">
+            </div>
+          </div>
+          <button type="button" id="btnSubmitForgot" class="btn btn-primary" style="width: 100%; justify-content: center; padding: 0.7rem;">
+            <span id="forgotSpinner" class="spinner-sm" style="display: none;"></span>
+            <span id="forgotBtnText">Gửi Mã Khôi Phục</span>
+          </button>
+          <div style="text-align: center; margin-top: 1rem;">
+            <button type="button" id="btnBackToLogin" class="link-btn" style="font-size: 0.8rem; color: var(--text-secondary);">← Quay lại Đăng nhập</button>
+          </div>
+        </div>
+
+        <!-- 5. CÀI ĐẶT GMAIL SMTP (GỬI THƯ THẬT) -->
+        <div id="authViewSmtp" class="auth-view" style="display: none;">
+          <div style="background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: var(--radius-sm); padding: 0.85rem; font-size: 0.8rem; line-height: 1.5; color: #bae6fd; margin-bottom: 1rem;">
+            💡 <strong>Hướng dẫn gửi email kích hoạt qua Gmail thật:</strong><br>
+            1. Bật xác thực 2 bước (2-Step Verification) trên Google Account.<br>
+            2. Vào <a href="https://myaccount.google.com/apppasswords" target="_blank" style="color: #38bdf8; text-decoration: underline;">myaccount.google.com/apppasswords</a> tạo <b>Mật khẩu ứng dụng (App Password)</b> 16 chữ cái.<br>
+            3. Dán email và mật khẩu 16 chữ cái vào ô dưới đây rồi bấm lưu.
+          </div>
+
+          <div class="control-group" style="margin-bottom: 0.75rem;">
+            <label for="smtpUser" class="form-label">Tài khoản Gmail của bạn:</label>
+            <input type="email" id="smtpUser" placeholder="ví_dụ@gmail.com" class="input-full">
+          </div>
+          <div class="control-group" style="margin-bottom: 1rem;">
+            <label for="smtpPass" class="form-label">Mật khẩu ứng dụng (App Password 16 chữ cái):</label>
+            <input type="password" id="smtpPass" placeholder="abcd efgh ijkl mnop" class="input-full" autocomplete="off">
+          </div>
+
+          <div style="display: flex; gap: 0.5rem;">
+            <button type="button" id="btnTestSmtp" class="btn btn-secondary" style="flex: 1; justify-content: center; border-color: #38bdf8; color: #38bdf8;">
+              <span id="testSmtpSpinner" class="spinner-sm" style="display: none;"></span>
+              <span>🔍 Thử Kết Nối</span>
+            </button>
+            <button type="button" id="btnSaveSmtp" class="btn btn-primary" style="flex: 1; justify-content: center;">
+              <span>💾 Lưu Cấu Hình</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Bảng Điều Khiển Quản Trị Hệ Thống (Admin Dashboard Modal) -->
+  <div id="adminDashboardModal" class="modal-overlay" style="display: none;">
+    <div class="modal-card" style="max-width: 1040px; width: 95vw; max-height: 90vh; display: flex; flex-direction: column;">
+      <div class="modal-header" style="border-bottom: 1px solid var(--border); padding: 1.25rem;">
+        <div class="modal-title-wrap">
+          <span class="modal-icon" style="color: #f59e0b; font-size: 1.5rem;">🛡️</span>
+          <div>
+            <h3 style="margin: 0; color: #f8fafc; font-size: 1.2rem; display: flex; align-items: center; gap: 0.5rem;">
+              <span>Bảng Điều Khiển Quản Trị Hệ Thống</span>
+              <span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 0.72rem; padding: 0.2rem 0.5rem;">Admin Control Center</span>
+            </h3>
+            <p class="text-muted" style="font-size: 0.82rem; margin: 0.25rem 0 0 0;">Quản lý danh sách thành viên, cấp quyền Admin, kích hoạt tài khoản và kiểm soát phiên làm việc</p>
+          </div>
+        </div>
+        <button id="btnCloseAdminModal" class="btn-close">✕</button>
+      </div>
+
+      <div class="modal-body" style="padding: 1.25rem; overflow-y: auto; flex: 1;">
+        <!-- Alert thông báo trong admin -->
+        <div id="adminAlertBox" class="test-result-box" style="display: none; margin-bottom: 1rem;"></div>
+
+        <!-- 1. CÁC THẺ KPI THỐNG KÊ QUẢN TRỊ -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+          <div class="stat-card" style="padding: 1rem; border-left: 4px solid #38bdf8;">
+            <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; margin-bottom: 0.25rem;">Tổng Thành Viên</div>
+            <div id="adminTotalUsers" style="font-size: 1.8rem; font-weight: 700; color: #f8fafc;">0</div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Người dùng đăng ký</div>
+          </div>
+          <div class="stat-card" style="padding: 1rem; border-left: 4px solid #f59e0b;">
+            <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; margin-bottom: 0.25rem;">Quản Trị Viên</div>
+            <div id="adminTotalAdmins" style="font-size: 1.8rem; font-weight: 700; color: #fbbf24;">0</div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Nắm quyền tối cao</div>
+          </div>
+          <div class="stat-card" style="padding: 1rem; border-left: 4px solid #10b981;">
+            <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; margin-bottom: 0.25rem;">Đã Kích Hoạt Email</div>
+            <div id="adminTotalVerified" style="font-size: 1.8rem; font-weight: 700; color: #34d399;">0</div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Tài khoản hợp lệ</div>
+          </div>
+          <div class="stat-card" style="padding: 1rem; border-left: 4px solid #818cf8;">
+            <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; margin-bottom: 0.25rem;">Phiên Đang Hoạt Động</div>
+            <div id="adminTotalSessions" style="font-size: 1.8rem; font-weight: 700; color: #a5b4fc;">0</div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Token còn hạn 30 ngày</div>
+          </div>
+        </div>
+
+        <!-- 2. THANH TÁC VỤ & BỘ LỌC TÌM KIẾM -->
+        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem; background: rgba(15, 23, 42, 0.4); padding: 0.85rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+          <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; flex: 1; min-width: 280px;">
+            <input type="text" id="adminSearchInput" placeholder="🔍 Tìm theo email hoặc tên..." style="flex: 2; min-width: 180px; padding: 0.5rem 0.75rem; background: #0b1120; border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 0.85rem;">
+            <select id="adminRoleSelect" style="flex: 1; min-width: 130px; padding: 0.5rem 0.75rem; background: #0b1120; border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 0.85rem;">
+              <option value="">Tất cả vai trò</option>
+              <option value="admin">👑 Quản trị viên (Admin)</option>
+              <option value="user">👤 Người dùng (User)</option>
+            </select>
+            <button type="button" id="btnRefreshAdmin" class="btn btn-secondary" style="padding: 0.5rem 0.85rem; font-size: 0.85rem;" title="Làm mới danh sách">
+              <span>🔄 Làm mới</span>
+            </button>
+          </div>
+
+          <div>
+            <button type="button" id="btnToggleAddUserForm" class="btn btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; font-weight: 600;">
+              <span>➕ Thêm Tài Khoản Mới</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 3. FORM THÊM TÀI KHOẢN MỚI (COLLAPSIBLE) -->
+        <div id="adminAddUserPanel" style="display: none; background: rgba(30, 41, 59, 0.6); border: 1px solid #38bdf8; border-radius: var(--radius-sm); padding: 1.25rem; margin-bottom: 1.25rem;">
+          <h4 style="margin: 0 0 1rem 0; color: #38bdf8; font-size: 0.95rem; display: flex; align-items: center; gap: 0.4rem;">
+            <span>➕ Thêm Người Dùng / Quản Trị Viên Trực Tiếp</span>
+          </h4>
+          <form id="formAdminCreateUser" onsubmit="return false;" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem;">
+            <div>
+              <label class="form-label" for="newAdminFullName">Họ và tên:</label>
+              <input type="text" id="newAdminFullName" placeholder="Nguyễn Văn A" class="input-full" required>
+            </div>
+            <div>
+              <label class="form-label" for="newAdminEmail">Địa chỉ Email:</label>
+              <input type="email" id="newAdminEmail" placeholder="user@gmail.com" class="input-full" required>
+            </div>
+            <div>
+              <label class="form-label" for="newAdminPassword">Mật khẩu khởi tạo:</label>
+              <input type="password" id="newAdminPassword" placeholder="Tối thiểu 6 ký tự" class="input-full" required minlength="6">
+            </div>
+            <div>
+              <label class="form-label" for="newAdminRole">Vai trò:</label>
+              <select id="newAdminRole" class="input-full">
+                <option value="user">👤 Người dùng (User)</option>
+                <option value="admin">👑 Quản trị viên (Admin)</option>
+              </select>
+            </div>
+            <div style="grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem; padding-top: 0.75rem; border-top: 1px solid var(--border);">
+              <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #94a3b8; cursor: pointer;">
+                <input type="checkbox" id="newAdminVerified" checked style="accent-color: #38bdf8; width: 16px; height: 16px;">
+                <span>Kích hoạt tài khoản ngay (Không cần xác minh OTP email)</span>
+              </label>
+              <div style="display: flex; gap: 0.5rem;">
+                <button type="button" id="btnCancelAddUser" class="btn btn-secondary" style="padding: 0.45rem 0.85rem; font-size: 0.85rem;">Hủy bỏ</button>
+                <button type="button" id="btnSubmitAdminCreateUser" class="btn btn-primary" style="padding: 0.45rem 1.25rem; font-size: 0.85rem; font-weight: 600;">
+                  <span id="createUserSpinner" class="spinner-sm" style="display: none;"></span>
+                  <span>💾 Tạo Tài Khoản</span>
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <!-- 4. BẢNG DANH SÁCH THÀNH VIÊN -->
+        <div style="overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-sm);">
+          <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.85rem;">
+            <thead>
+              <tr style="background: rgba(15, 23, 42, 0.7); border-bottom: 1px solid var(--border); color: var(--text-secondary);">
+                <th style="padding: 0.75rem 1rem;">Thành Viên</th>
+                <th style="padding: 0.75rem 1rem;">Vai Trò</th>
+                <th style="padding: 0.75rem 1rem;">Trạng Thái Email</th>
+                <th style="padding: 0.75rem 1rem;">Ngày Đăng Ký</th>
+                <th style="padding: 0.75rem 1rem; text-align: right;">Hành Động</th>
+              </tr>
+            </thead>
+            <tbody id="adminUsersTableBody">
+              <tr>
+                <td colspan="5" style="padding: 2rem; text-align: center; color: var(--text-muted);">
+                  <span class="spinner-sm" style="display: inline-block; vertical-align: middle; margin-right: 0.5rem;"></span>
+                  Đang tải danh sách thành viên...
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

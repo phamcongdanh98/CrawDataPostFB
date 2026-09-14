@@ -518,9 +518,322 @@ async function runAllTests() {
     assert.strictEqual(json.ok, false);
   });
 
+  // 9. QUẢN LÝ NGƯỜI DÙNG & XÁC THỰC EMAIL (USER AUTH & EMAIL VERIFICATION)
+  describe('9. Cơ sở dữ liệu Người dùng & Xác thực Email (User Auth & SMTP)');
+  const authDb = require('../src/auth-db');
+  const authService = require('../src/auth-service');
+  const bcrypt = require('bcryptjs');
+
+  const testEmail = `test_user_${Date.now()}@example.com`;
+  let testUserId = null;
+  let testSessionToken = null;
+
+  await test('authDb: Tạo người dùng mới và tìm theo email', async () => {
+    const hash = await bcrypt.hash('TestPassword123', 10);
+    const user = authDb.createUser({
+      email: testEmail,
+      passwordHash: hash,
+      fullName: 'Người Dùng Kiểm Thử',
+      role: 'user',
+      isVerified: 0
+    });
+    assert.ok(user);
+    assert.strictEqual(user.email, testEmail);
+    assert.strictEqual(user.is_verified, 0);
+    testUserId = user.id;
+
+    const found = authDb.findUserByEmail(testEmail);
+    assert.ok(found);
+    assert.strictEqual(found.id, testUserId);
+  });
+
+  await test('authDb: Sinh mã OTP và xác thực mã', () => {
+    const otp = '654321';
+    const record = authDb.createVerificationCode({
+      userId: testUserId,
+      code: otp,
+      type: 'REGISTER_VERIFY',
+      expiresInMinutes: 15
+    });
+    assert.ok(record);
+    assert.strictEqual(record.code, otp);
+
+    const valid = authDb.findValidVerificationCode({
+      userId: testUserId,
+      code: otp,
+      type: 'REGISTER_VERIFY'
+    });
+    assert.ok(valid);
+    assert.strictEqual(valid.code, otp);
+
+    authDb.markCodeUsed(valid.id);
+    const usedAgain = authDb.findValidVerificationCode({
+      userId: testUserId,
+      code: otp,
+      type: 'REGISTER_VERIFY'
+    });
+    assert.strictEqual(usedAgain, null, 'Mã đã dùng không được phép tái sử dụng');
+  });
+
+  await test('authDb: Tạo phiên đăng nhập session và xóa session', () => {
+    const token = 'test_token_' + Date.now();
+    const session = authDb.createUserSession({ userId: testUserId, token, expiresInDays: 1 });
+    assert.ok(session);
+    assert.strictEqual(session.token, token);
+
+    const foundSession = authDb.findSessionByToken(token);
+    assert.ok(foundSession);
+    assert.strictEqual(foundSession.user_id, testUserId);
+    assert.strictEqual(foundSession.email, testEmail);
+
+    const deleted = authDb.deleteSession(token);
+    assert.strictEqual(deleted, true);
+    assert.strictEqual(authDb.findSessionByToken(token), null);
+  });
+
+  const apiTestEmail = `api_user_${Date.now()}@example.com`;
+  let apiOtpCode = null;
+
+  await test('POST /api/auth/register: Đăng ký tài khoản thành công qua API', async () => {
+    const res = await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fullName: 'Nguyễn Văn Test',
+        email: apiTestEmail,
+        password: 'Password123'
+      })
+    });
+    assert.strictEqual(res.status, 200);
+    const json = await res.json();
+    assert.strictEqual(json.ok, true);
+    assert.strictEqual(json.pendingVerification, true);
+    assert.ok(json.simulatedCode, 'Chế độ test/mô phỏng phải sinh mã simulatedCode');
+    apiOtpCode = json.simulatedCode;
+  });
+
+  await test('POST /api/auth/login: Chặn đăng nhập khi chưa xác thực email', async () => {
+    const res = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: apiTestEmail,
+        password: 'Password123'
+      })
+    });
+    assert.strictEqual(res.status, 401);
+    const json = await res.json();
+    assert.strictEqual(json.ok, false);
+    assert.strictEqual(json.requireVerification, true);
+  });
+
+  await test('POST /api/auth/verify-email: Kích hoạt tài khoản bằng mã OTP', async () => {
+    const res = await fetch(`${baseUrl}/api/auth/verify-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: apiTestEmail,
+        code: apiOtpCode
+      })
+    });
+    assert.strictEqual(res.status, 200);
+    const json = await res.json();
+    assert.strictEqual(json.ok, true);
+    assert.ok(json.token);
+    assert.strictEqual(json.user.is_verified, 1);
+    testSessionToken = json.token;
+  });
+
+  await test('GET /api/auth/me: Trả về đúng thông tin tài khoản với Bearer token', async () => {
+    const res = await fetch(`${baseUrl}/api/auth/me`, {
+      headers: { 'Authorization': `Bearer ${testSessionToken}` }
+    });
+    assert.strictEqual(res.status, 200);
+    const json = await res.json();
+    assert.strictEqual(json.ok, true);
+    assert.strictEqual(json.user.email, apiTestEmail);
+    assert.strictEqual(json.user.fullName, 'Nguyễn Văn Test');
+    assert.strictEqual(json.user.isVerified, true);
+  });
+
+  await test('POST /api/auth/login: Đăng nhập thành công sau khi đã kích hoạt', async () => {
+    const res = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: apiTestEmail,
+        password: 'Password123'
+      })
+    });
+    assert.strictEqual(res.status, 200);
+    const json = await res.json();
+    assert.strictEqual(json.ok, true);
+    assert.ok(json.token);
+  });
+
+  await test('GET /api/auth/smtp-status: Trả về trạng thái SMTP', async () => {
+    const { status, data } = await fetchJson('/api/auth/smtp-status');
+    assert.strictEqual(status, 200);
+    assert.strictEqual(data.ok, true);
+    assert.strictEqual(typeof data.isConfigured, 'boolean');
+  });
+
+  // =========================================================================
+  console.log('\n📌 10. Quản trị hệ thống & Tài khoản Admin (Admin Dashboard & Seed Admin)');
+  // =========================================================================
+
+  let adminToken = null;
+  let adminUserId = null;
+  let createdTestUserId = null;
+
+  await test('authService.seedAdminAccount: Tự động khởi tạo tài khoản Admin mặc định', async () => {
+    const seedRes = await authService.seedAdminAccount();
+    assert.ok(seedRes);
+    assert.ok(seedRes.user);
+    assert.strictEqual(seedRes.user.role, 'admin');
+    assert.strictEqual(seedRes.user.is_verified, 1);
+  });
+
+  await test('POST /api/auth/login: Đăng nhập thành công với tài khoản Admin mặc định', async () => {
+    const res = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'admin@gmail.com',
+        password: 'Admin@123456'
+      })
+    });
+    assert.strictEqual(res.status, 200);
+    const json = await res.json();
+    assert.strictEqual(json.ok, true);
+    assert.strictEqual(json.user.role, 'admin');
+    assert.ok(json.token);
+    adminToken = json.token;
+    adminUserId = json.user.id;
+  });
+
+  await test('GET /api/admin/stats: Chặn truy cập khi không có token (401)', async () => {
+    const res = await fetch(`${baseUrl}/api/admin/stats`);
+    assert.strictEqual(res.status, 401);
+  });
+
+  await test('GET /api/admin/stats: Chặn truy cập đối với Người dùng thường (403 Forbidden)', async () => {
+    // Đăng nhập user thường để lấy token
+    const resLogin = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: apiTestEmail, password: 'Password123' })
+    });
+    const { token: normalUserToken } = await resLogin.json();
+
+    const res = await fetch(`${baseUrl}/api/admin/stats`, {
+      headers: { 'Authorization': `Bearer ${normalUserToken}` }
+    });
+    assert.strictEqual(res.status, 403);
+    const json = await res.json();
+    assert.strictEqual(json.ok, false);
+  });
+
+  await test('GET /api/admin/stats: Trả về đầy đủ số liệu KPI khi gọi bằng Admin token', async () => {
+    const res = await fetch(`${baseUrl}/api/admin/stats`, {
+      headers: { 'Authorization': `Bearer ${adminToken}` }
+    });
+    assert.strictEqual(res.status, 200);
+    const json = await res.json();
+    assert.strictEqual(json.ok, true);
+    assert.ok(json.stats.totalUsers >= 1);
+    assert.ok(json.stats.adminCount >= 1);
+    assert.ok(json.stats.verifiedCount >= 1);
+  });
+
+  await test('POST /api/admin/users: Admin tạo trực tiếp thành viên mới (kích hoạt ngay)', async () => {
+    const testAdminCreatedEmail = `admin_created_${Date.now()}@example.com`;
+    const res = await fetch(`${baseUrl}/api/admin/users`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({
+        fullName: 'Trần Thị Nhân Viên',
+        email: testAdminCreatedEmail,
+        password: 'Password123456',
+        role: 'user',
+        isVerified: true
+      })
+    });
+    assert.strictEqual(res.status, 200);
+    const json = await res.json();
+    assert.strictEqual(json.ok, true);
+    assert.strictEqual(json.user.email, testAdminCreatedEmail);
+    assert.strictEqual(json.user.is_verified, 1);
+    createdTestUserId = json.user.id;
+  });
+
+  await test('PATCH /api/admin/users/:id/role: Nâng quyền user thành Admin', async () => {
+    assert.ok(createdTestUserId);
+    const res = await fetch(`${baseUrl}/api/admin/users/${createdTestUserId}/role`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({ role: 'admin' })
+    });
+    assert.strictEqual(res.status, 200);
+    const json = await res.json();
+    assert.strictEqual(json.ok, true);
+
+    const userInDb = authDb.findUserById(createdTestUserId);
+    assert.strictEqual(userInDb.role, 'admin');
+  });
+
+  await test('PATCH /api/admin/users/:id/status: Tạm khóa tài khoản thành viên', async () => {
+    assert.ok(createdTestUserId);
+    const res = await fetch(`${baseUrl}/api/admin/users/${createdTestUserId}/status`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({ isVerified: false })
+    });
+    assert.strictEqual(res.status, 200);
+    const json = await res.json();
+    assert.strictEqual(json.ok, true);
+
+    const userInDb = authDb.findUserById(createdTestUserId);
+    assert.strictEqual(userInDb.is_verified, 0);
+  });
+
+  await test('DELETE /api/admin/users/:id: Chặn Admin tự xóa chính mình (400 Bad Request)', async () => {
+    const res = await fetch(`${baseUrl}/api/admin/users/${adminUserId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${adminToken}` }
+    });
+    assert.strictEqual(res.status, 400);
+    const json = await res.json();
+    assert.strictEqual(json.ok, false);
+  });
+
+  await test('DELETE /api/admin/users/:id: Xóa thành công tài khoản thành viên', async () => {
+    assert.ok(createdTestUserId);
+    const res = await fetch(`${baseUrl}/api/admin/users/${createdTestUserId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${adminToken}` }
+    });
+    assert.strictEqual(res.status, 200);
+    const json = await res.json();
+    assert.strictEqual(json.ok, true);
+
+    const userInDb = authDb.findUserById(createdTestUserId);
+    assert.strictEqual(userInDb, null, 'Người dùng phải được xóa khỏi cơ sở dữ liệu');
+  });
+
   // Dọn dẹp dữ liệu test trong SQLite và đóng testServer
   try {
     db.getDb().prepare("DELETE FROM posts WHERE id LIKE 'test_%' OR page_id = 'page_123'").run();
+    db.getDb().prepare("DELETE FROM users WHERE email LIKE '%@example.com'").run();
   } catch (e) {}
   await new Promise(resolve => testServer.close(resolve));
 

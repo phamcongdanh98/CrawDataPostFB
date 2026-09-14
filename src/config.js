@@ -121,12 +121,41 @@ const config = {
     return process.env.TELEGRAM_NOTIFY_ON_SYNC !== 'false';
   },
 
+  // Cấu hình Email SMTP (Gmail hoặc Custom SMTP)
+  get SMTP_HOST() {
+    return (process.env.SMTP_HOST || 'smtp.gmail.com').trim();
+  },
+  get SMTP_PORT() {
+    return parseInt(process.env.SMTP_PORT, 10) || 465;
+  },
+  get SMTP_SECURE() {
+    if (process.env.SMTP_SECURE !== undefined) {
+      return process.env.SMTP_SECURE === 'true';
+    }
+    return (parseInt(process.env.SMTP_PORT, 10) || 465) === 465;
+  },
+  get SMTP_USER() {
+    return (process.env.SMTP_USER || '').trim();
+  },
+  get SMTP_PASS() {
+    return (process.env.SMTP_PASS || '').trim();
+  },
+  get SMTP_FROM() {
+    const customFrom = (process.env.SMTP_FROM || '').trim();
+    if (customFrom) return customFrom;
+    return this.SMTP_USER ? `"Fanpage Analytics" <${this.SMTP_USER}>` : '"Fanpage Analytics" <no-reply@fanpage-stat.local>';
+  },
+
   isApiConfigured() {
     return Boolean(this.FB_PAGE_ID && this.FB_PAGE_ACCESS_TOKEN);
   },
 
   isTelegramConfigured() {
     return Boolean(this.TELEGRAM_BOT_TOKEN && this.TELEGRAM_CHAT_ID);
+  },
+
+  isSmtpConfigured() {
+    return Boolean(this.SMTP_USER && this.SMTP_PASS);
   },
 
   isProfilePresent() {
