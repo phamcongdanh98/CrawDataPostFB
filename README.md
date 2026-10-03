@@ -3,14 +3,21 @@
 Ứng dụng tự động hóa chuyên nghiệp kết hợp **Meta Graph API** chính thức và **Playwright Chromium**:
 - 📈 **Tương tác chuẩn xác 100% từ Graph API & Playwright**: Lấy trực tiếp Lượt thích / Cảm xúc (Likes/Reactions), Bình luận (Comments) và Lượt chia sẻ (Shares).
 - 👤 **Bóc tách danh tính người đăng (Publisher)**: Tự động phát hiện Quản trị viên/Biên tập viên nào đã đăng bài (*"Đăng bởi / Published by..."*) trong nội bộ Fanpage.
+- 🖼️ **Media Thumbnail & Lightbox Preview & Media Filter**:
+  - Xem ảnh thu nhỏ (52x52px) trực tiếp trong cột bài viết kèm huy hiệu (📷 Ảnh, 🎬 Video, 🔗 Link).
+  - Bấm vào ảnh mở ngay **Lightbox Modal** phóng to ảnh gốc sắc nét kèm nút tải ảnh về máy.
+  - Hộp lọc nhanh theo định dạng phương tiện trên Toolbar (`#filterMediaType`).
+- 🏢 **Multi-Fanpage Management (Quản lý Đa Fanpage)**:
+  - Lưu trữ và quản lý danh mục nhiều Fanpage trong cùng một cơ sở dữ liệu.
+  - Dropdown chuyển đổi Fanpage làm việc 1-click ngay trên Header.
 - 📊 **Visual Charts Dashboard & Lọc tương tác 1-Click (Chart.js)**:
   - Click vào thanh bất kỳ bên **Top Quản trị viên** (ví dụ: *Danh Phạm*) để tự động lọc danh sách bài viết của quản trị viên đó.
   - Click vào biểu đồ **Tỷ lệ bài viết** để lọc nhanh bài tự đăng / chia sẻ.
   - Click vào điểm trên biểu đồ **Xu hướng tương tác theo ngày** để lọc bài viết trong ngày đó.
 - 🎯 **Thanh Active Filter Chips & Lọc theo khoảng ngày**: Hiển thị các tiêu chí lọc đang kích hoạt trực quan, hỗ trợ chọn khoảng ngày linh hoạt ngay trên Toolbar bài viết.
-- 📑 **Xuất Excel (.xlsx) thông minh theo bộ lọc**: Tải ngay file Excel phản ánh đúng danh sách bài viết theo khoảng ngày và quản trị viên đã chọn, hiển thị số bài trực tiếp trên nút bấm.
+- 📑 **Xuất Excel (.xlsx) thông minh theo bộ lọc**: Tải ngay file Excel phản ánh đúng danh sách bài viết theo khoảng ngày và quản trị viên đã chọn, bổ sung cột định dạng và ảnh xem trước.
 - 🤖 **Auto-Sync Scheduler & Báo cáo Telegram Bot**: Lập lịch tự động quét ngầm định kỳ (1h, 3h, 6h, 12h, 24h) và tự động bắn báo cáo KPI chi tiết tới Telegram Bot.
-
+- 🐳 **Đóng gói Docker & Sẵn sàng Deploy**: Cung cấp sẵn `Dockerfile`, `docker-compose.yml` và cẩm nang `DEPLOYMENT.md` để triển khai lên VPS hoặc cloud miễn phí.
 
 ---
 

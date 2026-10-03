@@ -33,6 +33,36 @@ async function runAllTests() {
   console.log('🧪 BẮT ĐẦU CHẠY BỘ KIỂM THỬ DỰ ÁN CRAW DATA FB');
   console.log('====================================================');
 
+  // 0. PHÂN LOẠI BÀI VIẾT
+  describe('0. Phân loại SHARED/ORIGINAL (src/graph-api.js)');
+  const { classifyPostType } = require('../src/graph-api');
+  const PID = '778169405386344';
+  await test('classifyPostType: bài tự đăng status thuần -> ORIGINAL', () => {
+    assert.strictEqual(classifyPostType({ status_type: 'mobile_status_update', message: 'Việt Nam dự kiến diễu binh' }, PID), 'ORIGINAL');
+  });
+  await test('classifyPostType: bài đăng link báo (shared_story + share) -> ORIGINAL', () => {
+    const p = { status_type: 'shared_story', attachments: { data: [{ type: 'share', unshimmed_url: 'https://baokhanhhoa.vn/abc' }] } };
+    assert.strictEqual(classifyPostType(p, PID), 'ORIGINAL');
+  });
+  await test('classifyPostType: story "shared a link" kèm link ngoài -> ORIGINAL', () => {
+    const p = { story: 'Page shared a link.', attachments: { data: [{ type: 'share', unshimmed_url: 'https://vnexpress.net/x' }] } };
+    assert.strictEqual(classifyPostType(p, PID), 'ORIGINAL');
+  });
+  await test('classifyPostType: ảnh/album/video tự đăng (URL mang ID profile khác của Page) -> ORIGINAL', () => {
+    const album = { status_type: 'added_photos', attachments: { data: [{ type: 'album', unshimmed_url: 'https://www.facebook.com/122191012532946007/posts/1221946936' }] } };
+    const reel = { status_type: 'added_video', attachments: { data: [{ type: 'video_inline', unshimmed_url: 'https://www.facebook.com/reel/1112784334537154/' }] } };
+    assert.strictEqual(classifyPostType(album, PID), 'ORIGINAL');
+    assert.strictEqual(classifyPostType(reel, PID), 'ORIGINAL');
+  });
+  await test('classifyPostType: có parent_id (chia sẻ lại bài khác) -> SHARED', () => {
+    const p = { status_type: 'mobile_status_update', parent_id: '27956490360718148_1096715746250560', attachments: { data: [{ type: 'photo', unshimmed_url: 'https://www.facebook.com/photo.php?fbid=1' }] } };
+    assert.strictEqual(classifyPostType(p, PID), 'SHARED');
+  });
+  await test('classifyPostType: shared_story trỏ tới bài Facebook khác -> SHARED', () => {
+    const p = { status_type: 'shared_story', attachments: { data: [{ type: 'share', unshimmed_url: 'https://www.facebook.com/someone/posts/123' }] } };
+    assert.strictEqual(classifyPostType(p, PID), 'SHARED');
+  });
+
   // 1. CONFIG
   describe('1. Cấu hình hệ thống (src/config.js)');
   const config = require('../src/config');
@@ -830,9 +860,104 @@ async function runAllTests() {
     assert.strictEqual(userInDb, null, 'Người dùng phải được xóa khỏi cơ sở dữ liệu');
   });
 
+  console.log('\n📌 11. Quản lý Đa Fanpage & Lọc định dạng Media (Multi-Fanpage & Media Filter)');
+
+  const testPageId1 = 'page_test_alpha_' + Date.now();
+  const testPageId2 = 'page_test_beta_' + Date.now();
+
+  await test('db: upsertFanpage và getAllFanpages hoạt động chính xác', () => {
+    db.upsertFanpage({
+      id: testPageId1,
+      name: 'Fanpage Alpha Test',
+      accessToken: 'EAATestTokenAlpha',
+      isActive: 1
+    });
+
+    db.upsertFanpage({
+      id: testPageId2,
+      name: 'Fanpage Beta Test',
+      accessToken: 'EAATestTokenBeta',
+      isActive: 0
+    });
+
+    const pages = db.getAllFanpages();
+    assert.ok(Array.isArray(pages));
+    const p1 = pages.find(p => p.id === testPageId1);
+    assert.ok(p1);
+    assert.strictEqual(p1.name, 'Fanpage Alpha Test');
+    assert.strictEqual(p1.is_active, 1);
+  });
+
+  await test('db: setActiveFanpage kích hoạt duy nhất 1 fanpage', () => {
+    db.setActiveFanpage(testPageId2);
+    const pages = db.getAllFanpages();
+    const p1 = pages.find(p => p.id === testPageId1);
+    const p2 = pages.find(p => p.id === testPageId2);
+    assert.strictEqual(p1.is_active, 0);
+    assert.strictEqual(p2.is_active, 1);
+  });
+
+  await test('GET /api/fanpages: Trả về danh sách Fanpage quản lý', async () => {
+    const res = await fetch(`${baseUrl}/api/fanpages`);
+    assert.strictEqual(res.status, 200);
+    const json = await res.json();
+    assert.strictEqual(json.ok, true);
+    assert.ok(Array.isArray(json.fanpages));
+    assert.ok(json.fanpages.some(p => p.id === testPageId2));
+  });
+
+  await test('POST /api/fanpages/:id/select: Kích hoạt fanpage qua API', async () => {
+    const res = await fetch(`${baseUrl}/api/fanpages/${testPageId1}/select`, { method: 'POST' });
+    assert.strictEqual(res.status, 200);
+    const json = await res.json();
+    assert.strictEqual(json.ok, true);
+    assert.strictEqual(json.page.id, testPageId1);
+  });
+
+  await test('db: upsertPost lưu trữ chính xác thumbnail_url và media_type', () => {
+    const mediaPostId = 'test_media_post_' + Date.now();
+    db.upsertPost({
+      id: mediaPostId,
+      pageId: testPageId1,
+      message: 'Bài viết đính kèm hình ảnh sắc nét',
+      permalinkUrl: `https://facebook.com/${mediaPostId}`,
+      createdTime: new Date().toISOString(),
+      thumbnailUrl: 'https://example.com/photo_preview.jpg',
+      mediaType: 'photo',
+      postType: 'ORIGINAL',
+      likesCount: 150,
+      commentsCount: 20,
+      sharesCount: 5
+    });
+
+    const found = db.getPostById(mediaPostId);
+    assert.ok(found);
+    assert.strictEqual(found.thumbnail_url, 'https://example.com/photo_preview.jpg');
+    assert.strictEqual(found.media_type, 'photo');
+    assert.strictEqual(found.page_id, testPageId1);
+  });
+
+  await test('GET /api/posts: Lọc chuẩn xác theo mediaType và pageId', async () => {
+    const res = await fetch(`${baseUrl}/api/posts?pageId=${testPageId1}&mediaType=photo`);
+    assert.strictEqual(res.status, 200);
+    const json = await res.json();
+    assert.ok(json.items);
+    assert.ok(json.items.length > 0);
+    assert.strictEqual(json.items[0].media_type, 'photo');
+    assert.strictEqual(json.items[0].page_id, testPageId1);
+  });
+
+  await test('db: deleteFanpage xóa fanpage khỏi danh mục quản lý', () => {
+    db.deleteFanpage(testPageId1);
+    db.deleteFanpage(testPageId2);
+    const pages = db.getAllFanpages();
+    assert.strictEqual(pages.some(p => p.id === testPageId1), false);
+    assert.strictEqual(pages.some(p => p.id === testPageId2), false);
+  });
+
   // Dọn dẹp dữ liệu test trong SQLite và đóng testServer
   try {
-    db.getDb().prepare("DELETE FROM posts WHERE id LIKE 'test_%' OR page_id = 'page_123'").run();
+    db.getDb().prepare("DELETE FROM posts WHERE id LIKE 'test_%' OR page_id LIKE 'page_test_%'").run();
     db.getDb().prepare("DELETE FROM users WHERE email LIKE '%@example.com'").run();
   } catch (e) {}
   await new Promise(resolve => testServer.close(resolve));

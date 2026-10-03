@@ -74,13 +74,44 @@ function initSchema(db) {
   try { db.exec(`ALTER TABLE posts ADD COLUMN shares_count INTEGER DEFAULT 0;`); } catch (e) {}
   try { db.exec(`ALTER TABLE posts ADD COLUMN post_type TEXT DEFAULT 'ORIGINAL';`); } catch (e) {}
   try { db.exec(`ALTER TABLE posts ADD COLUMN sync_batch_id TEXT;`); } catch (e) {}
+  try { db.exec(`ALTER TABLE posts ADD COLUMN thumbnail_url TEXT;`); } catch (e) {}
+  try { db.exec(`ALTER TABLE posts ADD COLUMN media_type TEXT DEFAULT 'status';`); } catch (e) {}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_posts_post_type ON posts(post_type);`); } catch (e) {}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_posts_sync_batch ON posts(sync_batch_id);`); } catch (e) {}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_posts_media_type ON posts(media_type);`); } catch (e) {}
   // Composite indexes để tăng tốc tối đa việc lọc và thống kê nhiều điều kiện
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_posts_filter ON posts(sync_batch_id, publisher_status, post_type);`); } catch (e) {}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_posts_time_filter ON posts(created_time, publisher_status);`); } catch (e) {}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_posts_status_time ON posts(publisher_status, created_time DESC);`); } catch (e) {}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_posts_batch_time ON posts(sync_batch_id, created_time DESC);`); } catch (e) {}
+
+  // Bảng quản lý danh mục Đa Fanpage (Multi-Fanpage Management)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS fanpages (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      access_token TEXT,
+      category TEXT,
+      avatar_url TEXT,
+      is_active INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+
+  // Tự động thêm Fanpage mặc định từ .env nếu bảng fanpages chưa có
+  try {
+    const pageCount = db.prepare(`SELECT COUNT(*) as c FROM fanpages`).get()?.c || 0;
+    if (pageCount === 0 && config.FB_PAGE_ID) {
+      const nowStr = new Date().toISOString();
+      db.prepare(`
+        INSERT INTO fanpages (id, name, access_token, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, 1, ?, ?)
+      `).run(config.FB_PAGE_ID, 'Fanpage Mặc Định', config.FB_PAGE_ACCESS_TOKEN || '', nowStr, nowStr);
+    }
+  } catch (e) {
+    console.warn('[DB] Lỗi seed fanpages ban đầu:', e.message);
+  }
 
   // Gán đợt ban đầu cho các bài viết cũ chưa có sync_batch_id
   try {
@@ -139,11 +170,17 @@ function upsertPost(dbOrPost, postOrBatchId, maybeBatchId = null) {
   const now = new Date().toISOString();
   const existing = db.prepare(`SELECT id, publisher_status, sync_batch_id FROM posts WHERE id = ?`).get(post.id);
 
-  const likes = post.likes_count ?? 0;
-  const comments = post.comments_count ?? 0;
-  const shares = post.shares_count ?? 0;
-  const postType = post.post_type || 'ORIGINAL';
-  const canonicalUrl = getCanonicalPostUrl(post, post.page_id) || post.permalink_url;
+  const pageId = post.page_id || post.pageId || config.FB_PAGE_ID || 'unknown_page';
+  const createdTime = post.created_time || post.createdTime || now;
+  const permalinkUrl = post.permalink_url || post.permalinkUrl || '';
+  const thumbnailUrl = post.thumbnail_url || post.thumbnailUrl || null;
+  const mediaType = post.media_type || post.mediaType || 'status';
+  const postType = post.post_type || post.postType || 'ORIGINAL';
+  const likes = post.likes_count ?? post.likesCount ?? 0;
+  const comments = post.comments_count ?? post.commentsCount ?? 0;
+  const shares = post.shares_count ?? post.sharesCount ?? 0;
+
+  const canonicalUrl = getCanonicalPostUrl(post, pageId) || permalinkUrl;
   const targetBatchId = batchId || (existing ? existing.sync_batch_id : null);
 
   if (!existing) {
@@ -152,23 +189,27 @@ function upsertPost(dbOrPost, postOrBatchId, maybeBatchId = null) {
       INSERT INTO posts (
         id, page_id, message, created_time, permalink_url,
         likes_count, comments_count, shares_count, post_type,
+        thumbnail_url, media_type,
         publisher_status, attempt_count, sync_batch_id, created_at, updated_at
       ) VALUES (
         @id, @page_id, @message, @created_time, @permalink_url,
         @likes, @comments, @shares, @postType,
+        @thumbnailUrl, @mediaType,
         'PENDING', 0, @targetBatchId, @now, @now
       )
     `);
     stmt.run({
       id: post.id,
-      page_id: post.page_id,
+      page_id: pageId,
       message: post.message || '',
-      created_time: post.created_time,
+      created_time: createdTime,
       permalink_url: canonicalUrl,
       likes,
       comments,
       shares,
       postType,
+      thumbnailUrl,
+      mediaType,
       targetBatchId,
       now
     });
@@ -184,6 +225,8 @@ function upsertPost(dbOrPost, postOrBatchId, maybeBatchId = null) {
         comments_count = CASE WHEN @comments > 0 THEN @comments WHEN comments_count > 0 THEN comments_count ELSE @comments END,
         shares_count = CASE WHEN @shares > 0 THEN @shares WHEN shares_count > 0 THEN shares_count ELSE @shares END,
         post_type = COALESCE(@postType, post_type),
+        thumbnail_url = CASE WHEN @thumbnailUrl IS NOT NULL THEN @thumbnailUrl ELSE thumbnail_url END,
+        media_type = CASE WHEN @mediaType != 'status' THEN @mediaType ELSE media_type END,
         sync_batch_id = COALESCE(@targetBatchId, sync_batch_id),
         updated_at = @now
       WHERE id = @id
@@ -197,6 +240,8 @@ function upsertPost(dbOrPost, postOrBatchId, maybeBatchId = null) {
       comments,
       shares,
       postType,
+      thumbnailUrl,
+      mediaType,
       targetBatchId,
       now
     });
@@ -343,12 +388,14 @@ function getPendingPosts(optionsOrLimit = {}, legacyForce = false) {
  */
 function buildPostsFilterClause(options = {}) {
   const {
+    pageId,
     since,
     until,
     batchId,
     publisher,
     status,
     postType,
+    mediaType,
     search,
     minLikes,
     minComments,
@@ -358,6 +405,10 @@ function buildPostsFilterClause(options = {}) {
   const conditions = [];
   const params = {};
 
+  if (pageId && pageId !== 'ALL') {
+    conditions.push(`page_id = @pageId`);
+    params.pageId = pageId;
+  }
   if (batchId && batchId !== 'ALL') {
     conditions.push(`sync_batch_id = @batchId`);
     params.batchId = batchId;
@@ -383,6 +434,16 @@ function buildPostsFilterClause(options = {}) {
   if (postType && postType !== 'ALL') {
     conditions.push(`post_type = @postType`);
     params.postType = postType;
+  }
+  if (mediaType && mediaType !== 'ALL') {
+    if (mediaType === 'HAS_MEDIA') {
+      conditions.push(`(thumbnail_url IS NOT NULL AND thumbnail_url != '')`);
+    } else if (mediaType === 'NO_MEDIA') {
+      conditions.push(`(thumbnail_url IS NULL OR thumbnail_url = '')`);
+    } else {
+      conditions.push(`media_type = @mediaType`);
+      params.mediaType = mediaType;
+    }
   }
   if (search && search.trim()) {
     conditions.push(`(message LIKE @search OR id LIKE @search OR publisher_name LIKE @search)`);
@@ -736,6 +797,75 @@ function clearAllPostsData() {
   return { deletedPosts, deletedBatches };
 }
 
+/**
+ * Lấy danh sách toàn bộ Fanpages được quản lý kèm số bài viết và tương tác
+ */
+function getAllFanpages() {
+  const db = getDb();
+  return db.prepare(`
+    SELECT f.*, 
+           COUNT(p.id) as post_count,
+           COALESCE(SUM(p.likes_count + p.comments_count + p.shares_count), 0) as total_engagements
+    FROM fanpages f
+    LEFT JOIN posts p ON p.page_id = f.id
+    GROUP BY f.id
+    ORDER BY f.is_active DESC, f.created_at DESC
+  `).all();
+}
+
+/**
+ * Thêm hoặc cập nhật Fanpage
+ */
+function upsertFanpage({ id, name, accessToken = '', category = '', avatarUrl = '', isActive = 0 }) {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const cleanId = String(id).trim();
+  const cleanName = String(name).trim() || `Fanpage ${cleanId}`;
+
+  const existing = db.prepare(`SELECT id FROM fanpages WHERE id = ?`).get(cleanId);
+  if (!existing) {
+    db.prepare(`
+      INSERT INTO fanpages (id, name, access_token, category, avatar_url, is_active, created_at, updated_at)
+      VALUES (@id, @name, @accessToken, @category, @avatarUrl, @isActive, @now, @now)
+    `).run({ id: cleanId, name: cleanName, accessToken: accessToken || '', category, avatarUrl, isActive: isActive ? 1 : 0, now });
+  } else {
+    db.prepare(`
+      UPDATE fanpages SET
+        name = @name,
+        access_token = CASE WHEN @accessToken != '' THEN @accessToken ELSE access_token END,
+        category = COALESCE(@category, category),
+        avatar_url = COALESCE(@avatarUrl, avatar_url),
+        is_active = @isActive,
+        updated_at = @now
+      WHERE id = @id
+    `).run({ id: cleanId, name: cleanName, accessToken: accessToken || '', category, avatarUrl, isActive: isActive ? 1 : 0, now });
+  }
+  return db.prepare(`SELECT * FROM fanpages WHERE id = ?`).get(cleanId);
+}
+
+/**
+ * Đặt Fanpage hoạt động (Active)
+ */
+function setActiveFanpage(id) {
+  const db = getDb();
+  const cleanId = String(id).trim();
+  const runTx = db.transaction(() => {
+    db.prepare(`UPDATE fanpages SET is_active = 0`).run();
+    db.prepare(`UPDATE fanpages SET is_active = 1 WHERE id = ?`).run(cleanId);
+  });
+  runTx();
+  return db.prepare(`SELECT * FROM fanpages WHERE id = ?`).get(cleanId);
+}
+
+/**
+ * Xóa Fanpage khỏi danh sách quản lý
+ */
+function deleteFanpage(id) {
+  const db = getDb();
+  const cleanId = String(id).trim();
+  return db.prepare(`DELETE FROM fanpages WHERE id = ?`).run(cleanId);
+}
+
 function closeDb() {
   if (dbInstance) {
     try {
@@ -762,6 +892,10 @@ module.exports = {
   getPublishersList,
   getPublisherLeaderboard,
   createSyncBatch,
-  getSyncBatches
+  getSyncBatches,
+  getAllFanpages,
+  upsertFanpage,
+  setActiveFanpage,
+  deleteFanpage
 };
 

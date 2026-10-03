@@ -235,20 +235,8 @@ async function detectPublisher(page, options = {}) {
         });
         const postContainer = (validDialogs.length > 0 ? validDialogs[validDialogs.length - 1] : null) || document.querySelector('div[role="main"]') || document.body;
 
-        // Phân loại bài viết (ORIGINAL hay SHARED)
-        const shareIndicators = [
-          'đã chia sẻ một bài viết',
-          'đã chia sẻ bài viết',
-          'đã chia sẻ liên kết',
-          'đã chia sẻ một kỷ niệm',
-          'shared a post',
-          'shared a link'
-        ];
-        const lowerContainerText = (postContainer.textContent || '').toLowerCase();
-        const isShared = shareIndicators.some(ind => lowerContainerText.includes(ind));
-        if (isShared) {
-          postType = 'SHARED';
-        }
+        // Không phân loại SHARED/ORIGINAL ở đây: nội dung trang (bình luận, bài gợi ý) chứa chữ "đã chia sẻ"
+        // gây gắn SHARED nhầm. post_type do Graph API quyết định (parent_id).
 
         // Lọc các nút tương tác an toàn
         function scanInteractiveButtons(container) {

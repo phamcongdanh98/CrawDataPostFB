@@ -5,6 +5,46 @@ const { maskToken, vnDateToUtcTimestamp, sleep, getCanonicalPostUrl } = require(
 const { resolvePageAccessToken } = require('./token-resolver');
 
 /**
+ * Phân loại bài viết: SHARED (chia sẻ lại bài Facebook của người/trang khác) hay ORIGINAL (tự đăng).
+ * Lưu ý: status_type 'shared_story', attachment type 'share' và story "shared a link" của Graph API
+ * cũng xuất hiện ở bài tự đăng kèm link báo ngoài -> KHÔNG dùng làm dấu hiệu chia sẻ.
+ * @param {object} p - bài viết thô từ Graph API
+ * @param {string} pageId
+ * @returns {'SHARED'|'ORIGINAL'}
+ */
+function classifyPostType(p, pageId) {
+  // 1. parent_id: bài gốc được chia sẻ lại (dấu hiệu chắc chắn nhất)
+  if (p.parent_id) return 'SHARED';
+
+  // 2. status_type của bài do chính trang đăng (ảnh/video/status mới) -> tự đăng.
+  //    Không so ID chủ sở hữu trong URL vì Page có nhiều ID (vd 778169405386344 vs 122191012532946007).
+  if (/^(added_photos|added_video|mobile_status_update|wall_post|published_story|created_note|created_event)$/.test(p.status_type || '')) {
+    return 'ORIGINAL';
+  }
+
+  const attachments = p.attachments?.data || [];
+  const urls = attachments
+    .flatMap((att) => [att.unshimmed_url, att.url, att.target?.url])
+    .filter(Boolean)
+    .map((u) => String(u));
+
+  // 3. Attachment trỏ tới bài Facebook (post/video/reel/photo) trong bài kiểu shared_story
+  const isFbPostUrl = (u) =>
+    /^https?:\/\/(?:[\w-]+\.)?(?:facebook\.com|fb\.com|fb\.watch)\//i.test(u) &&
+    /(\/posts\/|\/permalink|story_fbid|\/videos\/|\/watch|\/reel\/|\/photos?\/|photo\.php|\/share\/|\/groups\/.+\/(?:posts|permalink))/i.test(u);
+  if (urls.some(isFbPostUrl)) return 'SHARED';
+
+  // 4. Story dạng "A đã chia sẻ bài viết của B" mà không có link ngoài Facebook
+  const story = (p.story || '').toLowerCase();
+  const hasExternalLink = urls.some((u) => !/(?:facebook\.com|fb\.com|fb\.watch)\//i.test(u));
+  if (!hasExternalLink && /đã chia sẻ (?:một )?(?:bài viết|ảnh|video|kỷ niệm|reel)|shared (?:a |an )?(?:post|photo|video|memory|reel)|shared .+'s (?:post|photo|video)/i.test(story)) {
+    return 'SHARED';
+  }
+
+  return 'ORIGINAL';
+}
+
+/**
  * Gọi Meta Graph API để lấy toàn bộ bài viết của Fanpage trong khoảng thời gian
  * Hỗ trợ tự động phân trang qua paging.next
  */
@@ -50,7 +90,7 @@ async function fetchPagePosts(sinceDate, untilDate, options = {}) {
   const initialUrl = new URL(`https://graph.facebook.com/${version}/${pageId}/posts`);
   initialUrl.searchParams.set(
     'fields',
-    'id,message,created_time,permalink_url,shares,status_type,parent_id,story,attachments{media_type,type,unshimmed_url,title,target},reactions.summary(total_count).limit(0).as(reactions),comments.summary(total_count).limit(0).as(comments)'
+    'id,message,created_time,permalink_url,shares,status_type,parent_id,story,full_picture,attachments{media_type,type,unshimmed_url,title,target,media{image{src}}},reactions.summary(total_count).limit(0).as(reactions),comments.summary(total_count).limit(0).as(comments)'
   );
   initialUrl.searchParams.set('limit', '100');
   initialUrl.searchParams.set('since', String(sinceTimestamp));
@@ -91,7 +131,7 @@ async function fetchPagePosts(sinceDate, untilDate, options = {}) {
           if (errCode === 10 || errMsg.includes('pages_read_user_content')) {
             console.warn(`[API] Token chưa có quyền 'pages_read_user_content'. Tự động chuyển sang fields cơ bản (lấy bài viết + shares + type)...`);
             const fallbackUrl = new URL(nextUrl);
-            fallbackUrl.searchParams.set('fields', 'id,message,created_time,permalink_url,shares,status_type,parent_id,story,attachments{media_type,type,unshimmed_url,title,target}');
+            fallbackUrl.searchParams.set('fields', 'id,message,created_time,permalink_url,shares,status_type,parent_id,story,full_picture,attachments{media_type,type,unshimmed_url,title,target,media{image{src}}}');
             nextUrl = fallbackUrl.toString();
             const fbRes = await fetch(nextUrl, {
               method: 'GET',
@@ -138,23 +178,19 @@ async function fetchPagePosts(sinceDate, untilDate, options = {}) {
       const commentsCount = p.comments?.summary?.total_count ?? 0;
       const sharesCount = p.shares?.count ?? 0;
 
-      // Phân loại bài viết chính xác:
-      // 1. Có parent_id (chia sẻ từ một bài viết cha khác)
-      // 2. status_type là 'shared_story'
-      // 3. story có chứa 'chia sẻ' hoặc 'shared'
-      // 4. attachments có type là 'share' hoặc link bài viết nguồn khác
-      const storyLower = (p.story || '').toLowerCase();
-      const isShared = Boolean(
-        p.parent_id ||
-        p.status_type === 'shared_story' ||
-        storyLower.includes('chia sẻ') ||
-        storyLower.includes('shared') ||
-        p.attachments?.data?.some(att => 
-          att.type === 'share' ||
-          (att.type === 'link' && att.unshimmed_url && att.unshimmed_url.includes('facebook.com') && !att.unshimmed_url.includes(pageId))
-        )
-      );
-      const postType = isShared ? 'SHARED' : 'ORIGINAL';
+      const postType = classifyPostType(p, pageId);
+
+      // Trích xuất hình ảnh thu nhỏ và phân loại media_type
+      const firstAttachment = p.attachments?.data?.[0];
+      const thumbnailUrl = p.full_picture || firstAttachment?.media?.image?.src || null;
+      let mediaType = 'status';
+      if (firstAttachment?.media_type === 'video' || firstAttachment?.type?.includes('video')) {
+        mediaType = 'video';
+      } else if (p.full_picture || firstAttachment?.media_type === 'photo' || firstAttachment?.type?.includes('photo') || firstAttachment?.type === 'album') {
+        mediaType = 'photo';
+      } else if (firstAttachment?.type === 'link' || firstAttachment?.type === 'share') {
+        mediaType = 'link';
+      }
 
       allPosts.push({
         id: p.id,
@@ -165,7 +201,9 @@ async function fetchPagePosts(sinceDate, untilDate, options = {}) {
         likes_count: likesCount,
         comments_count: commentsCount,
         shares_count: sharesCount,
-        post_type: postType
+        post_type: postType,
+        thumbnail_url: thumbnailUrl,
+        media_type: mediaType
       });
     }
 
@@ -194,5 +232,6 @@ async function fetchPagePosts(sinceDate, untilDate, options = {}) {
 }
 
 module.exports = {
-  fetchPagePosts
+  fetchPagePosts,
+  classifyPostType
 };

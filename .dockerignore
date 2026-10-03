@@ -2,14 +2,7 @@ node_modules
 npm-debug.log
 .git
 .gitignore
-.env
-.env.local
 .DS_Store
-fb_profile
-data/*.sqlite
-data/*.sqlite-journal
-data/*.sqlite-wal
-data/*.sqlite-shm
-test-results
-*.log
-.gemini
+*.sqlite-journal
+auth_profile/Singleton*
+.cache

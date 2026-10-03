@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  fb-crawler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fb_page_crawler_insight
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+    volumes:
+      # Mount thư mục lưu trữ cơ sở dữ liệu SQLite để không mất dữ liệu khi restart
+      - ./data:/app/data
+      # Mount thư mục lưu trữ cookie session Facebook của Playwright
+      - ./auth_profile:/app/auth_profile
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

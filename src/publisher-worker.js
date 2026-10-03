@@ -58,7 +58,13 @@ function getCandidateUrls(post) {
     urls.push(`https://www.facebook.com/permalink.php?story_fbid=${storyFbid}&id=${pageId}`);
   }
 
-  // 2. URL dự phòng permalink_url từ Graph API nếu không có storyFbid hoặc cần fallback
+  // 2. URL dạng /{pageId}/posts/{id}: các bài cũ (ảnh album, substory) không mở được bằng permalink.php
+  //    nhưng mở được bằng URL này
+  if (pageId && storyFbid) {
+    urls.push(`https://www.facebook.com/${pageId}/posts/${storyFbid}`);
+  }
+
+  // 3. URL dự phòng permalink_url từ Graph API nếu không có storyFbid hoặc cần fallback
   if (post.permalink_url && !urls.includes(post.permalink_url)) {
     urls.push(post.permalink_url);
   }
@@ -106,12 +112,13 @@ async function processSinglePost(pageOrContext, post) {
         break;
       }
 
-      // Nếu URL chính đã load thành công và ra NOT_FOUND thì không cần load lại URL phụ
-      if (pageLoaded && result.status === 'NOT_FOUND') {
+      // Reel: Facebook không hiển thị nhãn người đăng trên trang reel, thử URL khác cũng vô ích
+      if (result.status === 'NOT_FOUND' && /\/reel\//.test(page.url())) {
+        result.reason = 'Bài Reel: Facebook không hiển thị người đăng trên trang reel';
         break;
       }
 
-      // Nếu URL chính lỗi kết nối và còn URL dự phòng thì thử tiếp
+      // NOT_FOUND nhưng còn URL dự phòng -> thử tiếp (permalink.php có thể không hiển thị nhãn với bài cũ)
       if (i < urls.length - 1) {
         await sleep(200);
       }

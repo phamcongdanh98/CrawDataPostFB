@@ -211,6 +211,65 @@ app.post('/api/test-token', async (req, res) => {
   }
 });
 
+/**
+ * 2.3 Quản lý danh mục Đa Fanpage (Multi-Fanpage)
+ */
+app.get('/api/fanpages', (req, res) => {
+  try {
+    const list = db.getAllFanpages();
+    res.json({ ok: true, fanpages: list, items: list });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/fanpages', async (req, res) => {
+  try {
+    const { id, name, accessToken, category, avatarUrl } = req.body;
+    if (!id) {
+      return res.status(400).json({ ok: false, error: 'Thiếu ID Fanpage.' });
+    }
+    const page = db.upsertFanpage({ id, name, accessToken, category, avatarUrl });
+    res.json({ ok: true, message: 'Đã lưu thông tin Fanpage thành công', page });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/fanpages/:id/select', async (req, res) => {
+  try {
+    const pageId = req.params.id;
+    const page = db.setActiveFanpage(pageId);
+    if (!page) {
+      return res.status(404).json({ ok: false, error: 'Không tìm thấy Fanpage trong danh mục.' });
+    }
+
+    // Cập nhật cấu hình hiện tại để các lệnh crawl bài viết tự động chuyển sang Trang này
+    const updates = { FB_PAGE_ID: page.id };
+    if (page.access_token) {
+      updates.FB_PAGE_ACCESS_TOKEN = page.access_token;
+    }
+    config.updateEnvConfig(updates);
+
+    res.json({
+      ok: true,
+      message: `Đã kích hoạt làm việc với Fanpage: ${page.name} (${page.id})`,
+      page
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.delete('/api/fanpages/:id', (req, res) => {
+  try {
+    const pageId = req.params.id;
+    db.deleteFanpage(pageId);
+    res.json({ ok: true, message: 'Đã xóa Fanpage khỏi danh mục quản lý.' });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
 /**
  * 3. Trạng thái tiến trình worker hiện tại
@@ -248,11 +307,11 @@ app.post('/api/clear-data', (req, res) => {
  */
 app.get('/api/stats', (req, res) => {
   try {
-    let { since, until, batchId, publisher, status, postType, search, minLikes, minComments, minShares } = req.query;
+    let { pageId, since, until, batchId, publisher, status, postType, mediaType, search, minLikes, minComments, minShares } = req.query;
     if (since) since = normalizeDateStr(since) || since;
     if (until) until = normalizeDateStr(until) || until;
 
-    const stats = db.getStats({ since, until, batchId, publisher, status, postType, search, minLikes, minComments, minShares });
+    const stats = db.getStats({ pageId, since, until, batchId, publisher, status, postType, mediaType, search, minLikes, minComments, minShares });
     res.json(stats);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -264,11 +323,11 @@ app.get('/api/stats', (req, res) => {
  */
 app.get('/api/chart-data', (req, res) => {
   try {
-    let { since, until, batchId, publisher, status, postType, search, minLikes, minComments, minShares } = req.query;
+    let { pageId, since, until, batchId, publisher, status, postType, mediaType, search, minLikes, minComments, minShares } = req.query;
     if (since) since = normalizeDateStr(since) || since;
     if (until) until = normalizeDateStr(until) || until;
 
-    const chartData = db.getChartData({ since, until, batchId, publisher, status, postType, search, minLikes, minComments, minShares });
+    const chartData = db.getChartData({ pageId, since, until, batchId, publisher, status, postType, mediaType, search, minLikes, minComments, minShares });
     res.json({
       ok: true,
       ...chartData
@@ -295,11 +354,11 @@ app.get('/api/publishers', (req, res) => {
  */
 app.get('/api/publisher-leaderboard', (req, res) => {
   try {
-    let { since, until, batchId, postType, search } = req.query;
+    let { pageId, since, until, batchId, postType, search } = req.query;
     if (since) since = normalizeDateStr(since) || since;
     if (until) until = normalizeDateStr(until) || until;
 
-    const leaderboard = db.getPublisherLeaderboard({ since, until, batchId, postType, search });
+    const leaderboard = db.getPublisherLeaderboard({ pageId, since, until, batchId, postType, search });
     res.json(leaderboard);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -319,18 +378,20 @@ app.get('/api/batches', (req, res) => {
 });
 
 /**
- * 7. Danh sách bài viết có phân trang và bộ lọc (hỗ trợ batchId, postType, sortBy, sortOrder, minLikes, minComments, minShares)
+ * 7. Danh sách bài viết có phân trang và bộ lọc (hỗ trợ batchId, postType, mediaType, pageId, sortBy, sortOrder, minLikes, minComments, minShares)
  */
 app.get('/api/posts', (req, res) => {
   try {
-    const { since, until, batchId, publisher, status, postType, search, sortBy, sortOrder, minLikes, minComments, minShares, page = 1, limit = 20 } = req.query;
+    const { pageId, since, until, batchId, publisher, status, postType, mediaType, search, sortBy, sortOrder, minLikes, minComments, minShares, page = 1, limit = 20 } = req.query;
     const result = db.getPosts({
+      pageId,
       since,
       until,
       batchId,
       publisher,
       status,
       postType,
+      mediaType,
       search,
       sortBy,
       sortOrder,
@@ -395,15 +456,15 @@ app.post('/api/posts/batch-rescan', (req, res) => {
  */
 app.get('/api/export.csv', (req, res) => {
   try {
-    let { since, until, batchId, publisher, status, postType, search, sortBy, sortOrder, minLikes, minComments, minShares } = req.query;
+    let { pageId, since, until, batchId, publisher, status, postType, mediaType, search, sortBy, sortOrder, minLikes, minComments, minShares } = req.query;
     if (since) since = normalizeDateStr(since) || since;
     if (until) until = normalizeDateStr(until) || until;
 
-    const posts = db.getAllPostsForExport({ since, until, batchId, publisher, status, postType, search, sortBy, sortOrder, minLikes, minComments, minShares });
+    const posts = db.getAllPostsForExport({ pageId, since, until, batchId, publisher, status, postType, mediaType, search, sortBy, sortOrder, minLikes, minComments, minShares });
 
     // UTF-8 BOM để Excel hiển thị đúng tiếng Việt
     let csv = '\uFEFF';
-    csv += 'STT,Ngày đăng,Loại bài viết,Người đăng,Lượt thích (Likes),Bình luận (Comments),Chia sẻ (Shares),Nội dung bài viết,Trạng thái,Link Facebook,Publisher Profile URL,ID bài viết\n';
+    csv += 'STT,Ngày đăng,Loại bài viết,Người đăng,Lượt thích (Likes),Bình luận (Comments),Chia sẻ (Shares),Định dạng,Ảnh xem trước,Nội dung bài viết,Trạng thái,Link Facebook,Publisher Profile URL,ID bài viết\n';
 
     let index = 1;
     for (const p of posts) {
@@ -417,13 +478,15 @@ app.get('/api/export.csv', (req, res) => {
         p.likes_count || 0,
         p.comments_count || 0,
         p.shares_count || 0,
+        escapeCsvField(p.media_type || 'status'),
+        escapeCsvField(p.thumbnail_url || ''),
         escapeCsvField(p.message || ''),
         escapeCsvField(p.publisher_status),
         escapeCsvField(p.permalink_url),
         escapeCsvField(p.publisher_profile_url || ''),
         escapeCsvField(p.id)
-      ].join(',');
-      csv += row + '\n';
+      ];
+      csv += row.join(',') + '\n';
     }
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -435,16 +498,16 @@ app.get('/api/export.csv', (req, res) => {
 });
 
 /**
- * 8.1 Xuất dữ liệu Excel (.xlsx) chuyên nghiệp, thẩm mỹ cao
+ * 8.1 Xuất dữ liệu Excel (.xlsx) chuẩn doanh nghiệp
  */
 app.get('/api/export.xlsx', async (req, res) => {
   try {
     const { generateExcelReport } = require('./excel-exporter');
-    let { since, until, batchId, publisher, status, postType, search, sortBy, sortOrder, minLikes, minComments, minShares } = req.query;
+    let { pageId, since, until, batchId, publisher, status, postType, mediaType, search, sortBy, sortOrder, minLikes, minComments, minShares } = req.query;
     if (since) since = normalizeDateStr(since) || since;
     if (until) until = normalizeDateStr(until) || until;
 
-    const filterObj = { since, until, batchId, publisher, status, postType, search, sortBy, sortOrder, minLikes, minComments, minShares };
+    const filterObj = { pageId, since, until, batchId, publisher, status, postType, mediaType, search, sortBy, sortOrder, minLikes, minComments, minShares };
     const posts = db.getAllPostsForExport(filterObj);
     const stats = db.getStats(filterObj);
 
@@ -455,6 +518,7 @@ app.get('/api/export.xlsx', async (req, res) => {
     else if (since) filterDesc.push(`Từ ${since}`);
     else if (until) filterDesc.push(`Đến ${until}`);
     if (postType && postType !== 'ALL') filterDesc.push(`Loại: ${postType === 'SHARED' ? 'Chia sẻ' : 'Tự đăng'}`);
+    if (mediaType && mediaType !== 'ALL') filterDesc.push(`Phương tiện: ${mediaType}`);
     if (status && status !== 'ALL') filterDesc.push(`Trạng thái: ${status}`);
     if (publisher) filterDesc.push(`Người đăng: ${publisher}`);
     if (search) filterDesc.push(`Từ khóa: "${search}"`);

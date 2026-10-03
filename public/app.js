@@ -12,6 +12,8 @@ const state = {
   status: 'ALL',
   postType: 'ALL',
   search: '',
+  mediaType: 'ALL',
+  pageId: '',
   minLikes: '',
   selectedPostIds: new Set(),
   sortBy: 'created_time',
@@ -229,6 +231,22 @@ const detailPostShares = document.getElementById('detailPostShares');
 const detailPostMessage = document.getElementById('detailPostMessage');
 const detailPostLink = document.getElementById('detailPostLink');
 const detailPostId = document.getElementById('detailPostId');
+const detailPostMediaBox = document.getElementById('detailPostMediaBox');
+const detailPostImage = document.getElementById('detailPostImage');
+
+// Media Filter & Multi-Fanpage Selectors
+const filterMediaType = document.getElementById('filterMediaType');
+const headerPageSelect = document.getElementById('headerPageSelect');
+const savedPagesCount = document.getElementById('savedPagesCount');
+const savedFanpagesList = document.getElementById('savedFanpagesList');
+
+// Image Lightbox Modal Elements
+const imageLightboxModal = document.getElementById('imageLightboxModal');
+const lightboxImage = document.getElementById('lightboxImage');
+const btnCloseLightbox = document.getElementById('btnCloseLightbox');
+const lightboxDownloadBtn = document.getElementById('lightboxDownloadBtn');
+const lightboxFbLink = document.getElementById('lightboxFbLink');
+const lightboxCaption = document.getElementById('lightboxCaption');
 
 // ==========================================================================
 // TIỆN ÍCH CHUYỂN ĐỔI NGÀY THÁNG
@@ -485,8 +503,121 @@ if (btnGoToPublishersTab) {
 }
 
 // ==========================================================================
-// CẬP NHẬT TRẠNG THÁI CẤU HÌNH & XUẤT FILE
+// CẬP NHẬT TRẠNG THÁI CẤU HÌNH, FANPAGES & XUẤT FILE
 // ==========================================================================
+async function fetchFanpages() {
+  try {
+    const res = await fetch('/api/fanpages');
+    const data = await res.json();
+    if (!data.ok || !data.fanpages) return;
+
+    const fanpages = data.fanpages;
+    const activePage = fanpages.find(f => f.is_active === 1) || fanpages[0];
+    if (activePage && !state.pageId) {
+      state.pageId = activePage.id;
+    }
+
+    // Cập nhật dropdown ở Header
+    if (headerPageSelect) {
+      headerPageSelect.innerHTML = fanpages.map(fp => `
+        <option value="${escapeHtml(fp.id)}" ${fp.is_active ? 'selected' : ''}>
+          ${escapeHtml(fp.name || 'Fanpage')} (${escapeHtml(fp.id)})
+        </option>
+      `).join('');
+
+      if (fanpages.length > 0 && pageConnectedBadge) {
+        pageConnectedBadge.style.display = 'inline-flex';
+      }
+    }
+
+    // Cập nhật danh mục trong Settings Modal
+    if (savedPagesCount) savedPagesCount.textContent = fanpages.length;
+    if (savedFanpagesList) {
+      if (fanpages.length === 0) {
+        savedFanpagesList.innerHTML = '<div style="color: var(--text-dim); font-size: 0.8rem; padding: 0.5rem 0;">Chưa có Fanpage nào được lưu.</div>';
+      } else {
+        savedFanpagesList.innerHTML = fanpages.map(fp => `
+          <div class="fanpage-card-item ${fp.is_active ? 'is-active' : ''}">
+            <div class="fanpage-info-col">
+              <div class="fanpage-name-title">
+                <span>${escapeHtml(fp.name || 'Fanpage')}</span>
+                ${fp.is_active ? '<span class="fanpage-active-tag">Đang dùng</span>' : ''}
+              </div>
+              <div class="fanpage-id-sub">ID: ${escapeHtml(fp.id)}</div>
+            </div>
+            <div class="fanpage-action-btns">
+              ${!fp.is_active ? `
+                <button type="button" class="btn btn-xs btn-primary btn-select-fp" data-id="${escapeHtml(fp.id)}" title="Chọn làm Fanpage kích hoạt">
+                  Chọn
+                </button>
+              ` : ''}
+              <button type="button" class="btn btn-xs btn-outline btn-delete-fp" data-id="${escapeHtml(fp.id)}" title="Xóa Fanpage khỏi danh mục" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.4);">
+                ✕
+              </button>
+            </div>
+          </div>
+        `).join('');
+
+        savedFanpagesList.querySelectorAll('.btn-select-fp').forEach(btn => {
+          btn.addEventListener('click', () => selectFanpage(btn.dataset.id));
+        });
+
+        savedFanpagesList.querySelectorAll('.btn-delete-fp').forEach(btn => {
+          btn.addEventListener('click', () => deleteFanpage(btn.dataset.id));
+        });
+      }
+    }
+  } catch (err) {
+    console.error('Lỗi khi lấy danh sách Fanpages:', err);
+  }
+}
+
+async function selectFanpage(pageId) {
+  if (!pageId) return;
+  try {
+    const res = await fetch(`/api/fanpages/${encodeURIComponent(pageId)}/select`, { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) {
+      showToast({ type: 'success', title: 'Chuyển Fanpage thành công', message: data.message });
+      state.pageId = pageId;
+      state.page = 1;
+      await fetchFanpages();
+      await checkConfigStatus();
+      fetchPosts();
+      fetchStats();
+      fetchChartData();
+      fetchPublishers();
+      fetchBatches();
+    } else {
+      showToast({ type: 'error', title: 'Lỗi chuyển Fanpage', message: data.error });
+    }
+  } catch (err) {
+    showToast({ type: 'error', title: 'Lỗi', message: err.message });
+  }
+}
+
+async function deleteFanpage(pageId) {
+  if (!confirm(`Bạn có chắc muốn xóa Fanpage (${pageId}) khỏi danh mục quản lý không?`)) return;
+  try {
+    const res = await fetch(`/api/fanpages/${encodeURIComponent(pageId)}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.ok) {
+      showToast({ type: 'success', title: 'Đã xóa Fanpage', message: data.message });
+      fetchFanpages();
+    } else {
+      showToast({ type: 'error', title: 'Lỗi', message: data.error });
+    }
+  } catch (err) {
+    showToast({ type: 'error', title: 'Lỗi', message: err.message });
+  }
+}
+
+if (headerPageSelect) {
+  headerPageSelect.addEventListener('change', () => {
+    selectFanpage(headerPageSelect.value);
+  });
+}
+
 async function checkConfigStatus() {
   try {
     const res = await fetch('/api/config-status');
@@ -515,9 +646,11 @@ async function checkConfigStatus() {
     }
 
     if (data.pageId) {
-      pageConnectedBadge.style.display = 'inline-flex';
-      headerPageInfo.textContent = `Fanpage ID: ${data.pageId}`;
+      if (pageConnectedBadge) pageConnectedBadge.style.display = 'inline-flex';
+      if (headerPageInfo) headerPageInfo.textContent = `Fanpage ID: ${data.pageId}`;
     }
+
+    await fetchFanpages();
 
     if (!data.isApiConfigured) {
       banners.innerHTML += `
@@ -544,12 +677,14 @@ function updateExportLinks() {
   const untilVal = untilDateInput ? dmyToYmd(untilDateInput.value.trim()) : '';
 
   const params = new URLSearchParams();
+  if (state.pageId) params.set('pageId', state.pageId);
   if (sinceVal) params.set('since', sinceVal);
   if (untilVal) params.set('until', untilVal);
   if (state.batchId && state.batchId !== 'ALL') params.set('batchId', state.batchId);
   if (state.publisher) params.set('publisher', state.publisher);
   if (state.status !== 'ALL') params.set('status', state.status);
   if (state.postType && state.postType !== 'ALL') params.set('postType', state.postType);
+  if (state.mediaType && state.mediaType !== 'ALL') params.set('mediaType', state.mediaType);
   if (state.search) params.set('search', state.search);
   if (state.minLikes) params.set('minLikes', state.minLikes);
   if (state.sortBy) params.set('sortBy', state.sortBy);
@@ -746,6 +881,24 @@ function renderActiveFilterChips() {
     });
   }
 
+  // 3.1. Định dạng phương tiện (Hình ảnh / Video / Link / Chữ)
+  if (state.mediaType && state.mediaType !== 'ALL') {
+    const mediaLabels = { photo: '📷 Có hình ảnh', video: '🎬 Có video', link: '🔗 Có liên kết', status: '📝 Chỉ có chữ' };
+    chips.push({
+      key: 'mediaType',
+      icon: '🎨',
+      label: mediaLabels[state.mediaType] || `Phương tiện: ${state.mediaType}`,
+      clear: () => {
+        state.mediaType = 'ALL';
+        if (filterMediaType) filterMediaType.value = 'ALL';
+        state.page = 1;
+        updateExportLinks();
+        fetchPosts();
+        fetchCharts();
+      }
+    });
+  }
+
   // 4. Đợt đồng bộ
   if (state.batchId && state.batchId !== 'ALL') {
     chips.push({
@@ -914,12 +1067,14 @@ function updateStatsFilterBanner(isFiltering) {
 async function fetchStats() {
   try {
     const params = new URLSearchParams();
+    if (state.pageId) params.set('pageId', state.pageId);
     if (state.batchId && state.batchId !== 'ALL') params.set('batchId', state.batchId);
     if (state.since) params.set('since', state.since);
     if (state.until) params.set('until', state.until);
     if (state.publisher) params.set('publisher', state.publisher);
     if (state.status && state.status !== 'ALL') params.set('status', state.status);
     if (state.postType && state.postType !== 'ALL') params.set('postType', state.postType);
+    if (state.mediaType && state.mediaType !== 'ALL') params.set('mediaType', state.mediaType);
     if (state.search && state.search.trim()) params.set('search', state.search.trim());
     if (state.minLikes) params.set('minLikes', state.minLikes);
 
@@ -931,6 +1086,7 @@ async function fetchStats() {
       state.minLikes ||
       (state.status && state.status !== 'ALL') ||
       (state.postType && state.postType !== 'ALL') ||
+      (state.mediaType && state.mediaType !== 'ALL') ||
       (state.search && state.search.trim())
     );
 
@@ -1060,12 +1216,14 @@ async function fetchPosts() {
     limit: state.limit
   });
 
+  if (state.pageId) params.set('pageId', state.pageId);
   if (state.batchId && state.batchId !== 'ALL') params.set('batchId', state.batchId);
   if (state.since) params.set('since', state.since);
   if (state.until) params.set('until', state.until);
   if (state.publisher) params.set('publisher', state.publisher);
   if (state.status !== 'ALL') params.set('status', state.status);
   if (state.postType && state.postType !== 'ALL') params.set('postType', state.postType);
+  if (state.mediaType && state.mediaType !== 'ALL') params.set('mediaType', state.mediaType);
   if (state.search) params.set('search', state.search);
   if (state.minLikes) params.set('minLikes', state.minLikes);
   if (state.sortBy) params.set('sortBy', state.sortBy);
@@ -1155,7 +1313,7 @@ function renderPostsTable(items) {
     } else if (p.publisher_status === 'PENDING') {
       statusBadge = `<span class="badge badge-warning" title="Đang chờ quét bằng Playwright">⏳ Chờ quét</span>`;
     } else if (p.publisher_status === 'NOT_FOUND') {
-      statusBadge = `<span class="badge badge-secondary" title="Chưa nhận diện được tên tác giả">❓ Chưa rõ</span>`;
+      statusBadge = `<span class="badge badge-secondary" title="${escapeHtml(p.last_error || 'Chưa nhận diện được tên tác giả')}">❓ Chưa rõ</span>`;
     } else {
       statusBadge = `<span class="badge badge-danger" title="Lỗi khi truy cập bài viết">❌ ${escapeHtml(p.publisher_status)}</span>`;
     }
@@ -1184,9 +1342,34 @@ function renderPostsTable(items) {
     }
 
     const formattedDate = formatVnDateDisplay(p.created_time);
+
+    let mediaBadgeIcon = '';
+    if (p.media_type === 'photo') mediaBadgeIcon = '📷';
+    else if (p.media_type === 'video') mediaBadgeIcon = '🎬';
+    else if (p.media_type === 'link') mediaBadgeIcon = '🔗';
+
+    let thumbnailHtml = '';
+    if (p.thumbnail_url) {
+      thumbnailHtml = `
+        <div class="post-thumb-wrap" title="Bấm vào để phóng to hình ảnh gốc" data-thumb="${escapeHtml(p.thumbnail_url)}">
+          <img src="${escapeHtml(p.thumbnail_url)}" alt="Thumbnail" class="post-thumb-img" loading="lazy" onerror="this.parentElement.style.display='none'">
+          ${mediaBadgeIcon ? `<span class="post-media-badge">${mediaBadgeIcon}</span>` : ''}
+        </div>
+      `;
+    }
+
     const messagePreview = p.message 
       ? `<span class="post-preview-text" style="cursor: pointer;" title="Bấm để xem toàn bộ nội dung">${escapeHtml(truncateText(p.message, 110))}</span>` 
-      : '<em class="text-dim">Không có nội dung chữ (Hình ảnh / Video)</em>';
+      : `<em class="text-dim">${p.media_type === 'video' ? '🎬 Bài viết Video' : (p.media_type === 'photo' ? '📷 Bài viết Hình ảnh' : 'Không có nội dung chữ')}</em>`;
+
+    const previewCellHtml = `
+      <div class="post-preview-cell">
+        ${thumbnailHtml}
+        <div class="post-text-wrap cell-message-click">
+          ${messagePreview}
+        </div>
+      </div>
+    `;
 
     const likesCount = p.likes_count || 0;
     const commentsCount = p.comments_count || 0;
@@ -1211,7 +1394,7 @@ function renderPostsTable(items) {
       </td>
       <td style="text-align: center;">${postTypeBadge}</td>
       <td>${publisherHtml}</td>
-      <td class="cell-message-click">${messagePreview}</td>
+      <td>${previewCellHtml}</td>
       <td style="text-align: center; white-space: nowrap;">${interactionsHtml}</td>
       <td style="text-align: center;">${statusBadge}</td>
       <td style="text-align: center; white-space: nowrap;">
@@ -1271,6 +1454,15 @@ function renderPostsTable(items) {
           btnRescan.innerHTML = '🔄';
           btnRescan.title = 'Quét lại tác giả bài viết này';
         }
+      });
+    }
+
+    // Sự kiện click vào ảnh thumbnail để mở Lightbox phóng to
+    const thumbWrap = tr.querySelector('.post-thumb-wrap');
+    if (thumbWrap) {
+      thumbWrap.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openLightbox(p.thumbnail_url, getCanonicalPostUrl(p), p.message);
       });
     }
 
@@ -1368,6 +1560,17 @@ if (filterPostType) {
     state.page = 1;
     updateExportLinks();
     fetchPosts();
+  });
+}
+
+if (filterMediaType) {
+  filterMediaType.addEventListener('change', (e) => {
+    state.mediaType = e.target.value;
+    state.page = 1;
+    updateExportLinks();
+    fetchPosts();
+    fetchStats();
+    fetchChartData();
   });
 }
 
@@ -1894,6 +2097,20 @@ function openPostDetailModal(post) {
   detailPostShares.textContent = (post.shares_count || 0).toLocaleString();
 
   detailPostMessage.textContent = post.message || 'Bài viết này không có nội dung chữ (chỉ chứa hình ảnh, video hoặc liên kết).';
+
+  // Hiển thị ảnh media nếu có
+  if (detailPostMediaBox && detailPostImage) {
+    if (post.thumbnail_url) {
+      detailPostImage.src = post.thumbnail_url;
+      detailPostMediaBox.style.display = 'block';
+      detailPostImage.onclick = () => openLightbox(post.thumbnail_url, getCanonicalPostUrl(post), post.message);
+    } else {
+      detailPostMediaBox.style.display = 'none';
+      detailPostImage.src = '';
+      detailPostImage.onclick = null;
+    }
+  }
+
   detailPostLink.href = getCanonicalPostUrl(post) || '#';
   detailPostId.textContent = `Mã bài viết (FB ID): ${post.id}`;
 
@@ -1903,6 +2120,46 @@ function openPostDetailModal(post) {
 function closePostDetailModal() {
   if (postDetailModal) postDetailModal.style.display = 'none';
 }
+
+// ==========================================================================
+// IMAGE LIGHTBOX MODAL
+// ==========================================================================
+function openLightbox(src, postUrl, caption) {
+  if (!imageLightboxModal || !src) return;
+  if (lightboxImage) lightboxImage.src = src;
+  if (lightboxDownloadBtn) lightboxDownloadBtn.href = src;
+  if (lightboxFbLink) {
+    if (postUrl) {
+      lightboxFbLink.href = postUrl;
+      lightboxFbLink.style.display = 'inline-flex';
+    } else {
+      lightboxFbLink.style.display = 'none';
+    }
+  }
+  if (lightboxCaption) {
+    lightboxCaption.textContent = caption ? truncateText(caption, 80) : 'Ảnh đính kèm bài viết Facebook';
+  }
+  imageLightboxModal.style.display = 'flex';
+}
+
+function closeLightbox() {
+  if (imageLightboxModal) {
+    imageLightboxModal.style.display = 'none';
+    if (lightboxImage) lightboxImage.src = '';
+  }
+}
+
+if (btnCloseLightbox) btnCloseLightbox.addEventListener('click', closeLightbox);
+if (imageLightboxModal) {
+  imageLightboxModal.addEventListener('click', (e) => {
+    if (e.target === imageLightboxModal) closeLightbox();
+  });
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeLightbox();
+  }
+});
 
 if (btnClosePostDetailModal) btnClosePostDetailModal.addEventListener('click', closePostDetailModal);
 if (btnDismissPostDetailModal) btnDismissPostDetailModal.addEventListener('click', closePostDetailModal);
